@@ -37,7 +37,7 @@ pip install -r requirements.txt
 ### Basic Usage (Free API)
 
 ```bash
-python crypto_market_cap_dashboard.py
+python main.py
 ```
 
 The dashboard will open at `http://127.0.0.1:8052/`
@@ -90,11 +90,31 @@ python crypto_market_cap_dashboard.py
 ## Project Structure
 
 ```
-CryptoDashboard/
-├── crypto_market_cap_dashboard.py  # Main application
+CryptoMarket-Dashboard/
+├── main.py                          # Entry point
 ├── requirements.txt                 # Python dependencies
 ├── README.md                        # This file
 ├── .gitignore                      # Git ignore rules
+├── src/                            # Source code
+│   ├── __init__.py
+│   ├── config.py                   # Configuration settings
+│   ├── constants.py                # Coin definitions and constants
+│   ├── utils.py                    # Utility functions
+│   ├── data_manager.py             # Data loading and management
+│   ├── data/                       # Data processing modules
+│   │   ├── __init__.py
+│   │   ├── fetcher.py             # API fetching (sync & async)
+│   │   ├── cleaner.py             # Q fix and data cleaning
+│   │   └── transformer.py        # Smoothing and normalization
+│   ├── visualization/              # Visualization modules
+│   │   ├── __init__.py
+│   │   ├── colors.py              # Color utilities
+│   │   └── chart_builder.py       # Chart building functions
+│   └── app/                        # Dash application
+│       ├── __init__.py
+│       ├── app.py                 # App creation and setup
+│       ├── layout.py              # Dash layout
+│       └── callbacks.py           # Dash callbacks
 ├── cg_cache/                       # API response cache (auto-generated)
 ├── logs/                           # Log files (auto-generated)
 └── market_caps Data/              # Exported Excel files (auto-generated)
