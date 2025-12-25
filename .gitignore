@@ -44,6 +44,7 @@ Thumbs.db
 *.log
 *.csv
 *.txt
+!requirements.txt  # Exception: requirements.txt should be tracked
 *.xlsx
 
 # Environment variables
