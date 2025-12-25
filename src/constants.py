@@ -52,6 +52,6 @@ DOM_GRP = "metric"
 
 # Data Quality Thresholds
 MIN_MARKET_CAP_FOR_VALID = 200_000_000  # Minimum MC to consider data valid
-Q_DROP_THRESHOLD = -0.30  # Q drop threshold to detect corruption
-PRICE_DROP_THRESHOLD = -0.30  # Price drop threshold for comparison
+Q_DROP_THRESHOLD = -0.30  # Q drop threshold to detect corruption (≤-30%)
+PRICE_DROP_THRESHOLD = -0.30  # Price drop threshold for comparison (≤-30%)
 
