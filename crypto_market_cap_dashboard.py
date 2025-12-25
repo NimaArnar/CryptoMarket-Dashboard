@@ -182,14 +182,15 @@ def parse_market_caps(js: dict, coin_id: str = "") -> pd.Series:
                 history_idx = mc_aligned.index[history_mask]
 
                 if len(history_idx) >= 10:
-                    # Use all available history before break to calculate baseline Q (mean of Q before break)
+                    # Use the LAST correct Q value before break (not mean) - this is the most recent valid supply
                     mc_hist = mc_aligned.loc[history_idx]
                     price_hist = price_aligned.loc[history_idx]
 
                     valid_hist = (mc_hist > 0) & (price_hist > 0)
                     if valid_hist.any():
                         q_hist = (mc_hist[valid_hist] / price_hist[valid_hist])
-                        q_baseline = q_hist.mean()  # Use mean instead of median for more stable baseline
+                        # Use the LAST Q value before break_date (most recent correct value)
+                        q_baseline = q_hist.iloc[-1]  # Last correct Q value, not mean
 
                         if q_baseline > 0:
                             series_cleaned = series.copy()
@@ -246,7 +247,7 @@ def parse_market_caps(js: dict, coin_id: str = "") -> pd.Series:
                                         f"{coin_id or 'UNKNOWN'}: Detected corrupted supply on "
                                         f"{break_date.strftime('%Y-%m-%d')} "
                                         f"(Q drop={q_pct.loc[break_date]:+.1%}, price change={price_pct.loc[break_date]:+.1%}). "
-                                        f"Using fixed Q_baseline={q_baseline:,.0f} (mean of Q before {break_date.strftime('%Y-%m-%d')}). "
+                                        f"Using fixed Q_baseline={q_baseline:,.0f} (last correct Q before {break_date.strftime('%Y-%m-%d')}). "
                                         f"Recomputing MC as Q_baseline*Price from {break_date.strftime('%Y-%m-%d')} onward. "
                                         "Samples: " + "; ".join(fixed_samples)
                                     )
@@ -424,6 +425,35 @@ async def fetch_all_coins_async(coin_list: list) -> dict:
         return series_dict
 
 # -------------------- Transform helpers --------------------
+def find_dydx_baseline_date(series: pd.Series) -> tuple[Optional[pd.Timestamp], Optional[float]]:
+    """Find the baseline date and value for DYDX normalization.
+    Looks for Dec 25, 2024, or the closest valid date within 3 days."""
+    dec25 = pd.Timestamp("2024-12-25")
+    
+    # Try Dec 25 first
+    if dec25 in series.index:
+        val = series.loc[dec25]
+        if pd.notna(val) and val > 200_000_000:
+            return dec25, val
+    
+    # Try dates around Dec 25 (Dec 24-27)
+    for offset in [1, -1, 2, -2, 3]:
+        try_date = dec25 + pd.Timedelta(days=offset)
+        if try_date in series.index:
+            val = series.loc[try_date]
+            if pd.notna(val) and val > 200_000_000:
+                return try_date, val
+    
+    # If still not found, use first valid date after Dec 25
+    valid_mask = (series != 0) & (~pd.isna(series)) & (series.index >= dec25)
+    if valid_mask.any():
+        baseline_date = series[valid_mask].index[0]
+        baseline_val = series.loc[baseline_date]
+        if baseline_val > 200_000_000:
+            return baseline_date, baseline_val
+    
+    return None, None
+
 def apply_smoothing(df: pd.DataFrame, smoothing: str) -> pd.DataFrame:
     """Apply smoothing, preserving NaN values (which represent missing/zero data before first valid point)."""
     if smoothing == "No smoothing":
@@ -475,18 +505,15 @@ def normalize_start100(df: pd.DataFrame) -> pd.DataFrame:
         first_valid_idx = non_nan_data[non_zero_mask].index[0]
         first_valid_val = col_data.loc[first_valid_idx]
         
-        # CRITICAL: For DYDX, always use Dec 25, 2024 as baseline (not corrupted April 4)
+        # CRITICAL: For DYDX, always use Dec 25, 2024 (or nearby date) as baseline (not corrupted April 4)
         if c == "DYDX":
-            dec25 = pd.Timestamp("2024-12-25")
-            if dec25 in col_data.index:
-                dec25_val = col_data.loc[dec25]
-                # Ensure Dec 25 value is reasonable (between 200M and 2B)
-                if 200_000_000 <= dec25_val <= 2_000_000_000:
-                    first_valid_idx = dec25
-                    first_valid_val = dec25_val
-                    logger.info(f"DYDX normalization: Using Dec 25 as baseline (MC={first_valid_val:,.0f})")
-                else:
-                    logger.error(f"DYDX normalization: Dec 25 value is suspicious (MC={dec25_val:,.0f}), using auto-detected first_valid_idx")
+            baseline_date, baseline_val = find_dydx_baseline_date(col_data)
+            if baseline_date is not None and baseline_val is not None:
+                first_valid_idx = baseline_date
+                first_valid_val = baseline_val
+                logger.info(f"DYDX normalization: Using {baseline_date.strftime('%Y-%m-%d')} as baseline (MC={first_valid_val:,.0f})")
+            else:
+                logger.warning(f"DYDX normalization: Could not find valid baseline date, using auto-detected first_valid_idx")
         
         # Normalize using first valid value
         normalized = (col_data / first_valid_val * 100)
@@ -630,9 +657,8 @@ logger.info(success_msg)
 
 # -------------------- Export raw market cap data to Excel --------------------
 try:
-    # Create export folder on Desktop: "market_caps Data"
-    desktop_dir = os.path.join(os.path.expanduser("~"), "Desktop")
-    export_dir = os.path.join(desktop_dir, "market_caps Data")
+    # Create export folder in main project directory: "market_caps Data"
+    export_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "market_caps Data")
     os.makedirs(export_dir, exist_ok=True)
 
     for sym, s in series.items():
@@ -730,9 +756,25 @@ if "DYDX" in df_raw.columns:
                     df_prices = df_prices.sort_values("ts").groupby("date", as_index=False).last()
                     prices_fix = df_prices.set_index("date")["price"].sort_index()
                     
-                    # Fix all dates >= April 2 using Q_baseline
-                    q_baseline_fix = 415_347_669
+                    # Fix all dates >= April 2 using Q_baseline (last correct Q before break)
                     break_date_fix = pd.Timestamp("2025-04-02")
+                    # Calculate last correct Q value before break_date
+                    before_break = df_raw.index[df_raw.index < break_date_fix]
+                    if len(before_break) > 0 and "DYDX" in df_raw.columns:
+                        # Get last date before break
+                        last_correct_date = before_break[-1]
+                        if last_correct_date in prices_fix.index:
+                            last_mc = df_raw.loc[last_correct_date, "DYDX"]
+                            last_price = prices_fix.loc[last_correct_date]
+                            if last_price > 0 and last_mc > 0:
+                                q_baseline_fix = last_mc / last_price
+                            else:
+                                q_baseline_fix = 415_347_669  # Fallback if calculation fails
+                        else:
+                            q_baseline_fix = 415_347_669  # Fallback if price not available
+                    else:
+                        q_baseline_fix = 415_347_669  # Fallback if no data before break
+                    
                     dates_to_fix = df_raw.index[df_raw.index >= break_date_fix]
                     
                     for dt in dates_to_fix:
@@ -1107,11 +1149,17 @@ def render_chart(state, selected_syms, order):
     print("=" * 60)
     print("CALLBACK RUNNING - render_chart")
     print("=" * 60)
-    smoothing = state["smoothing"]
-    group_choice = state["group"]
-    view = state["view"]
+    
+    # Handle None state on initial load
+    if state is None:
+        logger.error("State is None in render_chart callback!")
+        state = {"group": DEFAULT_GROUP, "smoothing": DEFAULT_SMOOTHING, "view": DEFAULT_VIEW, "corr_mode": DEFAULT_CORR_MODE}
+    
+    smoothing = state.get("smoothing", DEFAULT_SMOOTHING)
+    group_choice = state.get("group", DEFAULT_GROUP)
+    view = state.get("view", DEFAULT_VIEW)
     selected_set = set(selected_syms or [])
-    print(f"View: {view}, Smoothing: {smoothing}")
+    print(f"View: {view}, Smoothing: {smoothing}, Group: {group_choice}")
 
     # Filter out zeros before smoothing for coins that start with zeros (like SKY after rebrand)
     # This prevents zeros from affecting smoothing calculations
@@ -1148,9 +1196,23 @@ def render_chart(state, selected_syms, order):
                         df_prices = df_prices.sort_values("ts").groupby("date", as_index=False).last()
                         prices = df_prices.set_index("date")["price"].sort_index()
                         if apr4 in prices.index:
-                            q_baseline = 415_347_669  # From the fix
-                            # Fix ALL dates >= April 2 in both df_raw and df_for_smoothing
+                            # Calculate last correct Q value before break_date
                             break_date_fix = pd.Timestamp("2025-04-02")
+                            before_break = df_raw.index[df_raw.index < break_date_fix]
+                            if len(before_break) > 0 and "DYDX" in df_raw.columns:
+                                last_correct_date = before_break[-1]
+                                if last_correct_date in prices.index:
+                                    last_mc = df_raw.loc[last_correct_date, "DYDX"]
+                                    last_price = prices.loc[last_correct_date]
+                                    if last_price > 0 and last_mc > 0:
+                                        q_baseline = last_mc / last_price
+                                    else:
+                                        q_baseline = 415_347_669  # Fallback
+                                else:
+                                    q_baseline = 415_347_669  # Fallback
+                            else:
+                                q_baseline = 415_347_669  # Fallback
+                            # Fix ALL dates >= April 2 in both df_raw and df_for_smoothing
                             dates_to_fix = [d for d in df_raw.index if d >= break_date_fix and d in prices.index]
                             
                             for dt in dates_to_fix:
@@ -1222,8 +1284,22 @@ def render_chart(state, selected_syms, order):
                             prices_smoothed = prices_smoothed_df["price"]
                             
                             # Recalculate MC = Q_baseline * Price_smoothed for dates >= break_date
-                            q_baseline = 415_347_669
+                            # Use last correct Q value before break_date
                             break_date = apr2
+                            before_break_smooth = df_for_smoothing.index[df_for_smoothing.index < break_date]
+                            if len(before_break_smooth) > 0 and "DYDX" in df_for_smoothing.columns:
+                                last_correct_date_smooth = before_break_smooth[-1]
+                                if last_correct_date_smooth in prices_raw.index:
+                                    last_mc_smooth = df_for_smoothing.loc[last_correct_date_smooth, "DYDX"]
+                                    last_price_smooth = prices_raw.loc[last_correct_date_smooth]
+                                    if last_price_smooth > 0 and last_mc_smooth > 0:
+                                        q_baseline = last_mc_smooth / last_price_smooth
+                                    else:
+                                        q_baseline = 415_347_669  # Fallback
+                                else:
+                                    q_baseline = 415_347_669  # Fallback
+                            else:
+                                q_baseline = 415_347_669  # Fallback
                             
                             for dt in df_for_smoothing.index:
                                 if dt >= break_date and dt in prices_smoothed.index:
@@ -1255,22 +1331,43 @@ def render_chart(state, selected_syms, order):
         if "DYDX" in df_s.columns:
             dydx_col = df_s["DYDX"]
             dec25 = pd.Timestamp("2024-12-25")
+            # Find the first valid date near Dec 25 (within 3 days)
+            baseline_date = None
+            baseline_mc = None
+            
+            # Try Dec 25 first
             if dec25 in dydx_col.index:
+                baseline_date = dec25
                 baseline_mc = dydx_col.loc[dec25]
-                if baseline_mc > 200_000_000:  # Valid baseline
-                    # Force normalize using Dec 25 as baseline
-                    dydx_normalized = (dydx_col / baseline_mc * 100)
-                    # Set values before Dec 25 to NaN
-                    dydx_normalized.loc[dydx_normalized.index < dec25] = pd.NA
-                    # Preserve existing NaN
-                    dydx_normalized[dydx_col.isna()] = pd.NA
-                    df_plot["DYDX"] = dydx_normalized
-                    logger.info(f"DYDX: Force normalized using Dec 25 baseline (MC={baseline_mc:,.0f})")
-                    print(f"DYDX: Force normalized, last value={dydx_normalized.dropna().iloc[-1]:.2f}")
-                else:
-                    logger.error(f"DYDX: Dec 25 baseline is invalid (MC={baseline_mc:,.0f})")
             else:
-                logger.error("DYDX: Dec 25 not found in df_s!")
+                # Try dates around Dec 25 (Dec 24-27)
+                for offset in [1, -1, 2, -2, 3]:
+                    try_date = dec25 + pd.Timedelta(days=offset)
+                    if try_date in dydx_col.index:
+                        mc_val = dydx_col.loc[try_date]
+                        if mc_val > 200_000_000:  # Valid baseline
+                            baseline_date = try_date
+                            baseline_mc = mc_val
+                            break
+                # If still not found, use first valid date after Dec 25
+                if baseline_date is None:
+                    valid_mask = (dydx_col != 0) & (~pd.isna(dydx_col)) & (dydx_col.index >= dec25)
+                    if valid_mask.any():
+                        baseline_date = dydx_col[valid_mask].index[0]
+                        baseline_mc = dydx_col.loc[baseline_date]
+            
+            if baseline_date is not None and baseline_mc is not None and baseline_mc > 200_000_000:
+                # Force normalize using baseline date
+                dydx_normalized = (dydx_col / baseline_mc * 100)
+                # Set values before baseline date to NaN
+                dydx_normalized.loc[dydx_normalized.index < baseline_date] = pd.NA
+                # Preserve existing NaN
+                dydx_normalized[dydx_col.isna()] = pd.NA
+                df_plot["DYDX"] = dydx_normalized
+                logger.info(f"DYDX: Force normalized using {baseline_date.strftime('%Y-%m-%d')} baseline (MC={baseline_mc:,.0f})")
+                print(f"DYDX: Force normalized, last value={dydx_normalized.dropna().iloc[-1]:.2f}")
+            else:
+                logger.warning(f"DYDX: Could not find valid baseline date near Dec 25, using default normalization")
         
         # Debug: Check DYDX normalized values and underlying MC
         if "DYDX" in df_plot.columns:
@@ -1298,10 +1395,13 @@ def render_chart(state, selected_syms, order):
                 
                 print(f"DEBUG CHART DYDX: First={first_date.strftime('%Y-%m-%d')} MC={first_mc:,.0f} Norm={first_norm:.2f}")
                 print(f"DEBUG CHART DYDX: Last={last_date.strftime('%Y-%m-%d')} MC={last_mc:,.0f} Norm={last_norm:.2f}")
+                apr4_mc_str = f"{apr4_mc:,.0f}" if apr4_mc is not None else "N/A"
+                apr4_norm_str = f"{apr4_norm:.2f}" if apr4_norm is not None else "N/A"
+                last_mc_str = f"{last_mc:,.0f}" if last_mc is not None else "N/A"
                 logger.info(
                     f"DEBUG CHART DYDX: First={first_date.strftime('%Y-%m-%d')} MC={first_mc:,.0f} Norm={first_norm:.2f}, "
-                    f"Apr4 MC={apr4_mc:,.0f if apr4_mc else 'N/A'} Norm={apr4_norm:.2f if apr4_norm else 'N/A'}, "
-                    f"Last={last_date.strftime('%Y-%m-%d')} MC={last_mc:,.0f if last_mc else 'N/A'} Norm={last_norm:.2f}"
+                    f"Apr4 MC={apr4_mc_str} Norm={apr4_norm_str}, "
+                    f"Last={last_date.strftime('%Y-%m-%d')} MC={last_mc_str} Norm={last_norm:.2f}"
                 )
         yaxis_title = "Index (100 = first value)"
         yaxis_type = "linear"
@@ -1381,17 +1481,16 @@ def render_chart(state, selected_syms, order):
             
             # FINAL SAFETY: Always recalculate DYDX normalization to ensure it's correct
             if sym in df_s.columns and normalized_view:
-                dec25 = pd.Timestamp("2024-12-25")
-                if dec25 in df_s.index:
-                    baseline_mc = df_s.loc[dec25, sym]
-                    if baseline_mc > 200_000_000:
-                        # Recalculate normalization
-                        data_series_fixed = (df_s[sym] / baseline_mc * 100)
-                        data_series_fixed.loc[data_series_fixed.index < dec25] = pd.NA
-                        data_series_fixed[df_s[sym].isna()] = pd.NA
-                        data_series = data_series_fixed
-                        logger.info(f"DYDX: Final safety recalculation - baseline={baseline_mc:,.0f}")
-                        print(f"DYDX: Final safety fix applied, last value={data_series.dropna().iloc[-1]:.2f if len(data_series.dropna()) > 0 else 'N/A'}")
+                baseline_date, baseline_mc = find_dydx_baseline_date(df_s[sym])
+                if baseline_date is not None and baseline_mc is not None:
+                    # Recalculate normalization
+                    data_series_fixed = (df_s[sym] / baseline_mc * 100)
+                    data_series_fixed.loc[data_series_fixed.index < baseline_date] = pd.NA
+                    data_series_fixed[df_s[sym].isna()] = pd.NA
+                    data_series = data_series_fixed
+                    logger.info(f"DYDX: Final safety recalculation - baseline={baseline_mc:,.0f} (date={baseline_date.strftime('%Y-%m-%d')})")
+                    last_val_str = f"{data_series.dropna().iloc[-1]:.2f}" if len(data_series.dropna()) > 0 else 'N/A'
+                    print(f"DYDX: Final safety fix applied, last value={last_val_str}")
         else:
             if sym in df_plot.columns:
                 data_series = df_plot[sym]
@@ -1405,12 +1504,11 @@ def render_chart(state, selected_syms, order):
             logger.error("DYDX data_series is None! This should never happen!")
             # Last resort: create it from df_s
             if sym in df_s.columns:
-                dec25 = pd.Timestamp("2024-12-25")
-                if dec25 in df_s.index:
-                    baseline = df_s.loc[dec25, sym]
+                baseline_date, baseline = find_dydx_baseline_date(df_s[sym])
+                if baseline_date is not None and baseline is not None:
                     data_series = (df_s[sym] / baseline * 100)
-                    data_series.loc[data_series.index < dec25] = pd.NA
-                    logger.warning("DYDX: Created data_series from df_s as last resort")
+                    data_series.loc[data_series.index < baseline_date] = pd.NA
+                    logger.warning(f"DYDX: Created data_series from df_s as last resort (baseline={baseline_date.strftime('%Y-%m-%d')})")
         
         # CRITICAL: For DYDX, ensure we use fixed data and correct normalization
         if data_series is None and sym in df_raw.columns:
@@ -1422,12 +1520,12 @@ def render_chart(state, selected_syms, order):
                 if not valid_mask.any():
                     continue  # No valid data
                 
-                # For DYDX, force use of Dec 25 as baseline (not corrupted April 4)
+                # For DYDX, force use of Dec 25 (or nearby date) as baseline (not corrupted April 4)
                 if sym == "DYDX":
-                    dec25 = pd.Timestamp("2024-12-25")
-                    if dec25 in raw_col.index and raw_col.loc[dec25] > 0:
-                        first_valid_idx = dec25
-                        first_valid_val = raw_col.loc[dec25]
+                    baseline_date, baseline_val = find_dydx_baseline_date(raw_col)
+                    if baseline_date is not None and baseline_val is not None:
+                        first_valid_idx = baseline_date
+                        first_valid_val = baseline_val
                     else:
                         first_valid_idx = raw_col[valid_mask].index[0]
                         first_valid_val = raw_col.loc[first_valid_idx]
@@ -1437,11 +1535,11 @@ def render_chart(state, selected_syms, order):
                 
                 # Verify first_valid_val is reasonable (for DYDX, should be ~713M, not ~10M)
                 if sym == "DYDX" and first_valid_val < 200_000_000:
-                    logger.warning(f"DYDX fallback: first_valid_val={first_valid_val:,.0f} is too small, using Dec 25")
-                    dec25 = pd.Timestamp("2024-12-25")
-                    if dec25 in raw_col.index and raw_col.loc[dec25] > 200_000_000:
-                        first_valid_idx = dec25
-                        first_valid_val = raw_col.loc[dec25]
+                    logger.warning(f"DYDX fallback: first_valid_val={first_valid_val:,.0f} is too small, finding baseline")
+                    baseline_date, baseline_val = find_dydx_baseline_date(raw_col)
+                    if baseline_date is not None and baseline_val is not None:
+                        first_valid_idx = baseline_date
+                        first_valid_val = baseline_val
                 
                 # Normalize using first valid value
                 data_series = (raw_col / first_valid_val * 100)
@@ -1472,29 +1570,28 @@ def render_chart(state, selected_syms, order):
         
         # FINAL SAFETY: For DYDX, always recalculate right before plotting
         if sym == "DYDX" and normalized_view and sym in df_s.columns:
-            dec25 = pd.Timestamp("2024-12-25")
-            if dec25 in df_s.index:
-                baseline_mc = df_s.loc[dec25, sym]
-                if baseline_mc > 200_000_000:
-                    # Recalculate the entire series
-                    data_series_final = (df_s[sym] / baseline_mc * 100)
-                    data_series_final.loc[data_series_final.index < dec25] = pd.NA
-                    data_series_final[df_s[sym].isna()] = pd.NA
-                    # Re-process for plotting
-                    valid_data_final = data_series_final.dropna()
-                    if len(valid_data_final) > 0:
-                        non_zero_final = valid_data_final != 0
-                        if non_zero_final.any():
-                            first_non_zero_final = valid_data_final[non_zero_final].index[0]
-                            valid_data = valid_data_final.loc[valid_data_final.index >= first_non_zero_final]
-                            logger.info(f"DYDX: Final pre-plot recalculation applied")
-                            last_val_final = valid_data.iloc[-1] if len(valid_data) > 0 else None
-                            print("=" * 60)
-                            print(f"DYDX FINAL PRE-PLOT FIX APPLIED")
-                            print(f"  Baseline MC: {baseline_mc:,.0f}")
-                            print(f"  Last date: {valid_data.index[-1].strftime('%Y-%m-%d')}")
-                            print(f"  Last normalized value: {last_val_final:.2f}")
-                            print("=" * 60)
+            baseline_date, baseline_mc = find_dydx_baseline_date(df_s[sym])
+            if baseline_date is not None and baseline_mc is not None:
+                # Recalculate the entire series
+                data_series_final = (df_s[sym] / baseline_mc * 100)
+                data_series_final.loc[data_series_final.index < baseline_date] = pd.NA
+                data_series_final[df_s[sym].isna()] = pd.NA
+                # Re-process for plotting
+                valid_data_final = data_series_final.dropna()
+                if len(valid_data_final) > 0:
+                    non_zero_final = valid_data_final != 0
+                    if non_zero_final.any():
+                        first_non_zero_final = valid_data_final[non_zero_final].index[0]
+                        valid_data = valid_data_final.loc[valid_data_final.index >= first_non_zero_final]
+                        logger.info(f"DYDX: Final pre-plot recalculation applied (baseline={baseline_date.strftime('%Y-%m-%d')})")
+                        last_val_final = valid_data.iloc[-1] if len(valid_data) > 0 else None
+                        print("=" * 60)
+                        print(f"DYDX FINAL PRE-PLOT FIX APPLIED")
+                        print(f"  Baseline date: {baseline_date.strftime('%Y-%m-%d')}")
+                        print(f"  Baseline MC: {baseline_mc:,.0f}")
+                        print(f"  Last date: {valid_data.index[-1].strftime('%Y-%m-%d')}")
+                        print(f"  Last normalized value: {last_val_final:.2f}")
+                        print("=" * 60)
         
         # Debug: Log actual values being plotted for DYDX
         if sym == "DYDX":
@@ -1513,36 +1610,45 @@ def render_chart(state, selected_syms, order):
                     logger.error(f"DYDX: Last value {last_val:.2f} seems wrong! Should be ~9.58")
                     # Force fix if wrong
                     if sym in df_s.columns:
-                        dec25 = pd.Timestamp("2024-12-25")
-                        if dec25 in df_s.index:
-                            baseline = df_s.loc[dec25, sym]
+                        baseline_date, baseline = find_dydx_baseline_date(df_s[sym])
+                        if baseline_date is not None and baseline is not None:
                             last_mc = df_s.loc[last_date, sym]
                             expected_last = (last_mc / baseline * 100)
                             if abs(last_val - expected_last) > 1.0:
                                 logger.error(f"DYDX: Recalculating - last={last_val:.2f}, expected={expected_last:.2f}")
                                 # Recalculate the whole series
                                 data_series_fixed = (df_s[sym] / baseline * 100)
-                                data_series_fixed.loc[data_series_fixed.index < dec25] = pd.NA
+                                data_series_fixed.loc[data_series_fixed.index < baseline_date] = pd.NA
                                 valid_data = data_series_fixed.dropna()
                                 if len(valid_data) > 0:
                                     valid_data = valid_data.loc[valid_data.index >= valid_data[valid_data != 0].index[0]]
                                     last_val = valid_data.iloc[-1]
                                     logger.warning(f"DYDX: Fixed! New last value={last_val:.2f}")
             
+            first_date_str = first_date.strftime('%Y-%m-%d') if first_date else 'N/A'
+            first_val_str = f"{first_val:.2f}" if first_val is not None else 'N/A'
+            apr4_val_str = f"{apr4_val:.2f}" if apr4_val is not None else 'N/A'
+            last_date_str = last_date.strftime('%Y-%m-%d') if last_date else 'N/A'
+            last_val_str = f"{last_val:.2f}" if last_val is not None else 'N/A'
+            last_3_str = list(valid_data.iloc[-3:].values) if len(valid_data) >= 3 else 'N/A'
+            
             print("=" * 60)
             print(f"PLOTTING DYDX TO CHART:")
             print(f"  View: {view}")
-            print(f"  First: {first_date.strftime('%Y-%m-%d') if first_date else 'N/A'} = {first_val:.2f if first_val else 'N/A'}")
-            print(f"  Apr 4: {apr4_val:.2f if apr4_val else 'N/A'}")
-            print(f"  Last: {last_date.strftime('%Y-%m-%d') if last_date else 'N/A'} = {last_val:.2f if last_val else 'N/A'}")
+            print(f"  First: {first_date_str} = {first_val_str}")
+            print(f"  Apr 4: {apr4_val_str}")
+            print(f"  Last: {last_date_str} = {last_val_str}")
             print(f"  Data points: {len(valid_data)}")
-            print(f"  Last 3 values: {list(valid_data.iloc[-3:].values) if len(valid_data) >= 3 else 'N/A'}")
+            print(f"  Last 3 values: {last_3_str}")
             print("=" * 60)
+            
+            apr4_log_str = 'N/A' if apr4_val is None else (f'{apr4_val:.2f}' if normalized_view else f'{apr4_val:,.0f}')
+            last_log_str = 'N/A' if last_val is None else (f'{last_val:.2f}' if normalized_view else f'{last_val:,.0f}')
             logger.info(
                 f"DEBUG PLOTTING DYDX: View={view}, "
-                f"First={first_date.strftime('%Y-%m-%d') if first_date else 'N/A'}={first_val:.2f if first_val else 'N/A'}, "
-                f"Apr4={'N/A' if apr4_val is None else (f'{apr4_val:.2f}' if normalized_view else f'{apr4_val:,.0f}')}, "
-                f"Last={'N/A' if last_val is None else (f'{last_val:.2f}' if normalized_view else f'{last_val:,.0f}')}, "
+                f"First={first_date_str}={first_val_str}, "
+                f"Apr4={apr4_log_str}, "
+                f"Last={last_log_str}, "
                 f"Data points={len(valid_data)}, Source={'df_plot' if sym in df_plot.columns else 'fallback'}"
             )
         
@@ -1580,6 +1686,11 @@ def render_chart(state, selected_syms, order):
         margin=dict(r=380, t=70),
         uirevision="keep",
     )
+    
+    print(f"Returning figure with {len(fig.data)} traces")
+    if len(fig.data) == 0:
+        logger.warning("WARNING: Figure has no traces! cur_order might be empty or no valid data found.")
+        print(f"WARNING: cur_order={cur_order}, order={order}, group_choice={group_choice}")
     return fig
 
 # ---------- Correlation + Scatter ----------
@@ -1678,7 +1789,7 @@ def corr_and_scatter(state, selected_syms, order):
 
 # -------------------- Run --------------------
 if __name__ == "__main__":
-    startup_msg = "Starting Dash… open http://127.0.0.1:8050/"
+    startup_msg = "Starting Dash… open http://127.0.0.1:8052/"
     logger.info(startup_msg)
     logger.info(f"Log file: {LOG_FILE}")
-    app.run(debug=False)
+    app.run(debug=True, port=8052)

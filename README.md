@@ -40,7 +40,7 @@ pip install -r requirements.txt
 python crypto_market_cap_dashboard.py
 ```
 
-The dashboard will open at `http://127.0.0.1:8050/`
+The dashboard will open at `http://127.0.0.1:8052/`
 
 ### With CoinGecko Pro API (Optional)
 
@@ -105,9 +105,12 @@ CryptoDashboard/
 ### Data Cleaning
 
 The dashboard automatically detects and fixes corrupted circulating supply data by:
-1. Calculating implied supply (Q = Market Cap / Price)
-2. Detecting abnormal supply drops that don't match price movements
-3. Recomputing market cap using a stable baseline supply × current price
+1. Calculating implied supply (Q = Market Cap / Price) for each day
+2. Detecting abnormal supply drops (≥30%) that don't match price movements
+3. Using the **last correct Q value** before corruption as the baseline
+4. Recomputing market cap as: `MC_fixed = Q_baseline × Price` from the break date onward
+
+This ensures market cap accurately reflects price movements even when API supply data is corrupted (e.g., DYDX on April 2-4, 2025).
 
 ### Views
 
