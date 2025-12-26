@@ -81,7 +81,7 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         n_s0, n_s7, n_s14, n_s30,
         n_v_lin, n_v_log, n_v_mc,
         n_c_off, n_c_ret, n_c_lvl,
-        n_sel_all, n_unsel_all,
+        n_sel_all, n_unselect_all,
         restyle,
         state, selected, order
     ):
@@ -157,14 +157,21 @@ def register_callbacks(app, data_manager: DataManager) -> None:
                         elif v in (False, "legendonly"):
                             selected_set.discard(sym)
         
-        # Restrict selected to current order
-        if order:
-            allowed = set(order)
+        # CRITICAL: Recalculate order based on new_state to ensure selected coins
+        # are filtered correctly when view/group changes
+        current_group = new_state.get("group", DEFAULT_GROUP)
+        current_view = new_state.get("view", DEFAULT_VIEW)
+        group_syms = group_filter(symbols_all, meta, current_group)
+        current_order = symbols_for_view(group_syms, current_view)
+        
+        # Restrict selected to current order (use recalculated order, not old one)
+        if current_order:
+            allowed = set(current_order)
             selected_set = {s for s in selected_set if s in allowed}
         
         def sort_key(s):
             try:
-                return (order.index(s) if order and s in order else 10**9, s)
+                return (current_order.index(s) if current_order and s in current_order else 10**9, s)
             except ValueError:
                 return (10**9, s)
         
