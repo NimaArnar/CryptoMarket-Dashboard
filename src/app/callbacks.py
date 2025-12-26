@@ -45,19 +45,15 @@ def register_callbacks(app, data_manager: DataManager) -> None:
     def update_order(state):
         """Update trace order whenever state changes."""
         if state is None:
-            return []
-        group_syms = group_filter(symbols_all, meta, state["group"])
-        return symbols_for_view(group_syms, state["view"])
+            # Use defaults if state is None
+            group_syms = group_filter(symbols_all, meta, DEFAULT_GROUP)
+            return symbols_for_view(group_syms, DEFAULT_VIEW)
+        group_syms = group_filter(symbols_all, meta, state.get("group", DEFAULT_GROUP))
+        return symbols_for_view(group_syms, state.get("view", DEFAULT_VIEW))
     
     @app.callback(
         Output("state", "data"),
         Output("selected", "data"),
-        Input("btn-all", "n_clicks"),
-        Input("btn-infra", "n_clicks"),
-        Input("btn-defi", "n_clicks"),
-        Input("btn-memes", "n_clicks"),
-        Input("btn-consumer", "n_clicks"),
-        Input("btn-infra-memes", "n_clicks"),
         Input("btn-s0", "n_clicks"),
         Input("btn-s7", "n_clicks"),
         Input("btn-s14", "n_clicks"),
@@ -68,8 +64,6 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         Input("btn-corr-off", "n_clicks"),
         Input("btn-corr-ret", "n_clicks"),
         Input("btn-corr-lvl", "n_clicks"),
-        Input("btn-select-all", "n_clicks"),
-        Input("btn-unselect-all", "n_clicks"),
         Input("chart", "restyleData"),
         State("state", "data"),
         State("selected", "data"),
@@ -77,11 +71,9 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         prevent_initial_call=True
     )
     def update_state_and_selected(
-        n_all, n_infra, n_defi, n_memes, n_consumer, n_infra_memes,
         n_s0, n_s7, n_s14, n_s30,
         n_v_lin, n_v_log, n_v_mc,
         n_c_off, n_c_ret, n_c_lvl,
-        n_sel_all, n_unselect_all,
         restyle,
         state, selected, order
     ):
@@ -90,22 +82,11 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         new_state = dict(state or {})
         selected_set = set(selected or [])
         
-        # Group buttons
-        if trig == "btn-all":
-            new_state["group"] = "all"
-        elif trig == "btn-infra":
-            new_state["group"] = "infra"
-        elif trig == "btn-defi":
-            new_state["group"] = "defi"
-        elif trig == "btn-memes":
-            new_state["group"] = "memes"
-        elif trig == "btn-consumer":
-            new_state["group"] = "consumer"
-        elif trig == "btn-infra-memes":
-            new_state["group"] = "infra+memes"
+        # Group buttons removed from UI but functionality preserved (defaults to "all")
+        # Group state is maintained but not changeable via UI
         
         # Smoothing buttons
-        elif trig == "btn-s0":
+        if trig == "btn-s0":
             new_state["smoothing"] = "No smoothing"
         elif trig == "btn-s7":
             new_state["smoothing"] = "7D SMA"
@@ -130,11 +111,8 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         elif trig == "btn-corr-lvl":
             new_state["corr_mode"] = "levels"
         
-        # Bulk selection buttons
-        elif trig == "btn-select-all":
-            selected_set = set(order or [])
-        elif trig == "btn-unselect-all":
-            selected_set = set()
+        # Bulk selection buttons removed from UI
+        # Users can still use legend clicks to toggle coins
         
         # Legend click persistence
         elif trig == "chart" and restyle and order:
@@ -186,6 +164,13 @@ def register_callbacks(app, data_manager: DataManager) -> None:
     )
     def render_chart(state, selected_syms, order):
         """Render the main chart with all selected coins."""
+        # Filter selected coins to match current order if order is available
+        if order and selected_syms:
+            filtered_selected = [s for s in selected_syms if s in order]
+            if len(filtered_selected) != len(selected_syms):
+                logger.info(f"Filtered selected coins to match order: {len(selected_syms)} -> {len(filtered_selected)}")
+                selected_syms = filtered_selected
+        
         return _render_chart_internal(state, selected_syms, order, df_raw, meta, symbols_all)
     
     @app.callback(
@@ -243,7 +228,15 @@ def _render_chart_internal(
     
     # Build figure
     fig = go.Figure()
-    cur_order = order or symbols_for_view(group_filter(symbols_all, meta, group_choice), view)
+    
+    # Calculate order if not provided or empty
+    if not order:
+        group_syms = group_filter(symbols_all, meta, group_choice)
+        cur_order = symbols_for_view(group_syms, view)
+    else:
+        cur_order = order
+    
+    logger.debug(f"Chart rendering: {len(cur_order)} coins in order, {len(selected_set)} selected")
     
     for sym in cur_order:
         if sym not in meta:
@@ -321,9 +314,14 @@ def _render_chart_internal(
         uirevision="keep",
     )
     
-    logger.debug(f"Returning figure with {len(fig.data)} traces")
+    logger.info(f"Chart rendered: {len(fig.data)} traces, order={len(cur_order)}, selected={len(selected_set)}")
     if len(fig.data) == 0:
-        logger.warning("WARNING: Figure has no traces! cur_order might be empty or no valid data found.")
+        logger.error(
+            f"ERROR: Figure has no traces! "
+            f"cur_order={cur_order[:5] if cur_order else 'empty'}, "
+            f"selected_set={list(selected_set)[:5] if selected_set else 'empty'}, "
+            f"df_raw columns={list(df_raw.columns)[:5] if not df_raw.empty else 'empty'}"
+        )
     
     return fig
 

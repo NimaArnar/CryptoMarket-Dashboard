@@ -16,9 +16,21 @@ def create_layout(coin_status: dict, default_selected: list) -> html.Div:
         HTML Div containing the full layout
     """
     return html.Div(
-        style={"fontFamily": "Arial", "padding": "12px"},
+        style={
+            "fontFamily": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+            "padding": "20px",
+            "maxWidth": "100%",
+            "backgroundColor": "#f8f9fa"
+        },
         children=[
-            html.H3("1Y Chart — Group/Smoothing/View + Correlation + Returns Scatter"),
+            html.H2(
+                "Crypto Market Cap Dashboard",
+                style={
+                    "marginBottom": "10px",
+                    "color": "#2c3e50",
+                    "fontWeight": "600"
+                }
+            ),
             
             _create_coin_status_div(coin_status),
             
@@ -36,17 +48,27 @@ def create_layout(coin_status: dict, default_selected: list) -> html.Div:
             
             _create_controls_div(),
             
-            dcc.Graph(id="chart", style={"height": "62vh"}),
+            dcc.Graph(id="chart", style={"height": "75vh", "marginTop": "20px"}),
             
             html.Div(
-                style={"marginTop": "10px", "fontWeight": "bold"},
-                children="Returns scatter (Coin A vs Coin B)"
+                style={
+                    "marginTop": "20px",
+                    "fontWeight": "600",
+                    "fontSize": "16px",
+                    "color": "#2c3e50"
+                },
+                children="Returns Scatter (Coin A vs Coin B)"
             ),
-            dcc.Graph(id="scatter", style={"height": "32vh"}),
+            dcc.Graph(id="scatter", style={"height": "35vh", "marginTop": "10px"}),
             
             html.Div(
-                style={"marginTop": "8px", "color": "#666"},
-                children="Tip: Use legend to toggle coins. Correlation + scatter appear when exactly 2 symbols are selected."
+                style={
+                    "marginTop": "12px",
+                    "color": "#6c757d",
+                    "fontSize": "13px",
+                    "fontStyle": "italic"
+                },
+                children="💡 Tip: Use legend to toggle coins. Correlation + scatter appear when exactly 2 symbols are selected."
             )
         ]
     )
@@ -57,35 +79,35 @@ def _create_coin_status_div(coin_status: dict) -> html.Div:
     children = [
         html.Span(
             f"✅ Loaded: {coin_status['total_loaded']}/{coin_status['total_expected']} coins",
-            style={"color": "#28a745", "fontWeight": "bold"}
+            style={"color": "#28a745", "fontWeight": "600", "fontSize": "14px"}
         ),
         html.Br(),
-        html.Span("Available: ", style={"fontWeight": "bold"}),
+        html.Span("Available: ", style={"fontWeight": "600", "fontSize": "14px"}),
         html.Span(
             ", ".join(coin_status['available'][:10]) +
             (f" (+{len(coin_status['available']) - 10} more)" if len(coin_status['available']) > 10 else ""),
-            style={"color": "#333"}
+            style={"color": "#495057", "fontSize": "14px"}
         ),
     ]
     
     if coin_status['missing']:
         children.extend([
             html.Br(),
-            html.Span("⚠️ Missing: ", style={"fontWeight": "bold", "color": "#dc3545"}),
-            html.Span(", ".join(coin_status['missing']), style={"color": "#dc3545"}),
+            html.Span("⚠️ Missing: ", style={"fontWeight": "600", "color": "#dc3545", "fontSize": "14px"}),
+            html.Span(", ".join(coin_status['missing']), style={"color": "#dc3545", "fontSize": "14px"}),
         ])
     
     return html.Div(
         id="coin-status",
         style={
-            "marginBottom": "16px",
-            "marginTop": "8px",
-            "padding": "12px",
+            "marginBottom": "20px",
+            "marginTop": "0px",
+            "padding": "14px 16px",
             "backgroundColor": "#e8f4f8",
-            "border": "2px solid #17a2b8",
-            "borderRadius": "6px",
-            "fontSize": "13px",
-            "boxShadow": "0 2px 4px rgba(0,0,0,0.1)"
+            "border": "1px solid #bee5eb",
+            "borderRadius": "8px",
+            "fontSize": "14px",
+            "boxShadow": "0 2px 4px rgba(0,0,0,0.08)"
         },
         children=children
     )
@@ -93,41 +115,133 @@ def _create_coin_status_div(coin_status: dict) -> html.Div:
 
 def _create_controls_div() -> html.Div:
     """Create the controls section with buttons."""
+    button_style = {
+        "padding": "10px 20px",
+        "margin": "4px",
+        "border": "1px solid #dee2e6",
+        "borderRadius": "6px",
+        "backgroundColor": "#ffffff",
+        "color": "#495057",
+        "fontSize": "14px",
+        "fontWeight": "500",
+        "cursor": "pointer",
+        "transition": "all 0.2s ease",
+        "boxShadow": "0 1px 3px rgba(0,0,0,0.1)"
+    }
+    
+    button_style_hover = {
+        **button_style,
+        "backgroundColor": "#f8f9fa",
+        "borderColor": "#adb5bd",
+        "transform": "translateY(-1px)",
+        "boxShadow": "0 2px 4px rgba(0,0,0,0.15)"
+    }
+    
+    active_button_style = {
+        **button_style,
+        "backgroundColor": "#007bff",
+        "color": "#ffffff",
+        "borderColor": "#007bff",
+        "boxShadow": "0 2px 6px rgba(0,123,255,0.3)"
+    }
+    
     return html.Div(
-        style={"display": "flex", "gap": "16px", "flexWrap": "wrap"},
+        style={
+            "display": "flex",
+            "gap": "24px",
+            "flexWrap": "wrap",
+            "padding": "16px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "8px",
+            "boxShadow": "0 2px 4px rgba(0,0,0,0.08)",
+            "marginBottom": "10px"
+        },
         children=[
-            html.Div(children=[
-                html.Div("Group:", style={"fontWeight": "bold"}),
-                html.Button("Show all", id="btn-all"),
-                html.Button("Show only Infrastructure", id="btn-infra"),
-                html.Button("Show only DeFi", id="btn-defi"),
-                html.Button("Show only Memes", id="btn-memes"),
-                html.Button("Show only Consumer", id="btn-consumer"),
-                html.Button("Infra + Memes", id="btn-infra-memes"),
-                html.Hr(),
-                html.Button("Select all (legend on)", id="btn-select-all"),
-                html.Button("Unselect all (legend off)", id="btn-unselect-all"),
-            ]),
-            html.Div(children=[
-                html.Div("Smoothing:", style={"fontWeight": "bold"}),
-                html.Button("No smoothing", id="btn-s0"),
-                html.Button("7D SMA", id="btn-s7"),
-                html.Button("14D EMA", id="btn-s14"),
-                html.Button("30D SMA", id="btn-s30"),
-            ]),
-            html.Div(children=[
-                html.Div("View:", style={"fontWeight": "bold"}),
-                html.Button("Normalized (Linear)", id="btn-view-norm-lin"),
-                html.Button("Normalized (Log)", id="btn-view-norm-log"),
-                html.Button("Market Cap (Log)", id="btn-view-mc-log"),
-            ]),
-            html.Div(children=[
-                html.Div("Correlation:", style={"fontWeight": "bold"}),
-                html.Button("Off", id="btn-corr-off"),
-                html.Button("Returns", id="btn-corr-ret"),
-                html.Button("Levels", id="btn-corr-lvl"),
-                html.Div(id="corr-output", style={"marginTop": "8px", "fontSize": "14px"}),
-            ]),
+            html.Div(
+                style={"display": "flex", "flexDirection": "column", "gap": "8px"},
+                children=[
+                    html.Div(
+                        "Smoothing",
+                        style={
+                            "fontWeight": "600",
+                            "fontSize": "13px",
+                            "color": "#6c757d",
+                            "textTransform": "uppercase",
+                            "letterSpacing": "0.5px",
+                            "marginBottom": "4px"
+                        }
+                    ),
+                    html.Div(
+                        style={"display": "flex", "flexWrap": "wrap", "gap": "4px"},
+                        children=[
+                            html.Button("No smoothing", id="btn-s0", style=button_style),
+                            html.Button("7D SMA", id="btn-s7", style=button_style),
+                            html.Button("14D EMA", id="btn-s14", style=button_style),
+                            html.Button("30D SMA", id="btn-s30", style=button_style),
+                        ]
+                    )
+                ]
+            ),
+            html.Div(
+                style={"display": "flex", "flexDirection": "column", "gap": "8px"},
+                children=[
+                    html.Div(
+                        "View",
+                        style={
+                            "fontWeight": "600",
+                            "fontSize": "13px",
+                            "color": "#6c757d",
+                            "textTransform": "uppercase",
+                            "letterSpacing": "0.5px",
+                            "marginBottom": "4px"
+                        }
+                    ),
+                    html.Div(
+                        style={"display": "flex", "flexWrap": "wrap", "gap": "4px"},
+                        children=[
+                            html.Button("Normalized (Linear)", id="btn-view-norm-lin", style=button_style),
+                            html.Button("Normalized (Log)", id="btn-view-norm-log", style=button_style),
+                            html.Button("Market Cap (Log)", id="btn-view-mc-log", style=button_style),
+                        ]
+                    )
+                ]
+            ),
+            html.Div(
+                style={"display": "flex", "flexDirection": "column", "gap": "8px"},
+                children=[
+                    html.Div(
+                        "Correlation",
+                        style={
+                            "fontWeight": "600",
+                            "fontSize": "13px",
+                            "color": "#6c757d",
+                            "textTransform": "uppercase",
+                            "letterSpacing": "0.5px",
+                            "marginBottom": "4px"
+                        }
+                    ),
+                    html.Div(
+                        style={"display": "flex", "flexWrap": "wrap", "gap": "4px"},
+                        children=[
+                            html.Button("Off", id="btn-corr-off", style=button_style),
+                            html.Button("Returns", id="btn-corr-ret", style=button_style),
+                            html.Button("Levels", id="btn-corr-lvl", style=button_style),
+                        ]
+                    ),
+                    html.Div(
+                        id="corr-output",
+                        style={
+                            "marginTop": "8px",
+                            "fontSize": "13px",
+                            "color": "#495057",
+                            "fontWeight": "500",
+                            "padding": "8px 12px",
+                            "backgroundColor": "#f8f9fa",
+                            "borderRadius": "4px"
+                        }
+                    ),
+                ]
+            ),
         ]
     )
 
