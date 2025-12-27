@@ -176,13 +176,27 @@ def register_callbacks(app, data_manager: DataManager) -> None:
     @app.callback(
         Output("corr-output", "children"),
         Output("scatter", "figure"),
+        Output("scatter-container", "style"),  # Control visibility
         Input("state", "data"),
         Input("selected", "data"),
         Input("order", "data"),
     )
     def corr_and_scatter(state, selected_syms, order):
         """Calculate correlation and render scatter plot."""
-        return _corr_and_scatter_internal(state, selected_syms, order, df_raw)
+        corr_text, scatter_fig = _corr_and_scatter_internal(state, selected_syms, order, df_raw)
+        
+        # Check if exactly 2 coins are selected
+        allowed = set(order or [])
+        sel = [s for s in (selected_syms or []) if s in allowed]
+        show_scatter = len(sel) == 2
+        
+        # Hide scatter container if not exactly 2 coins
+        container_style = {
+            "marginTop": "20px",
+            "display": "block" if show_scatter else "none"
+        }
+        
+        return corr_text, scatter_fig, container_style
 
 
 def _load_price_data() -> Dict[str, pd.Series]:
