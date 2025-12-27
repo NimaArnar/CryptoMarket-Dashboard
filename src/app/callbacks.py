@@ -185,6 +185,31 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         return _corr_and_scatter_internal(state, selected_syms, order, df_raw)
 
 
+def _load_price_data() -> Dict[str, pd.Series]:
+    """Load price data from cache files for all coins."""
+    from src.config import CACHE_DIR, DAYS_HISTORY, VS_CURRENCY
+    from src.constants import COINS
+    
+    prices_dict = {}
+    
+    for coin_id, sym, _, _ in COINS:
+        cache_path = CACHE_DIR / f"{coin_id}_{DAYS_HISTORY}d_{VS_CURRENCY}.json"
+        if cache_path.exists():
+            try:
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    js = json.load(f)
+                
+                if "prices" in js and js["prices"]:
+                    df_prices = pd.DataFrame(js["prices"], columns=["ts", "price"])
+                    df_prices["date"] = pd.to_datetime(df_prices["ts"], unit="ms").dt.floor("D")
+                    df_prices = df_prices.sort_values("ts").groupby("date", as_index=False).last()
+                    prices_dict[sym] = df_prices.set_index("date")["price"].sort_index()
+            except Exception as e:
+                logger.warning(f"Failed to load price data for {sym}: {e}")
+    
+    return prices_dict
+
+
 def _render_chart_internal(
     state: Dict,
     selected_syms: List[str],
@@ -210,6 +235,9 @@ def _render_chart_internal(
     selected_set = set(selected_syms or [])
     
     logger.debug(f"Rendering chart: View={view}, Smoothing={smoothing}, Group={group_choice}")
+    
+    # Load price data for tooltips
+    prices_dict = _load_price_data()
     
     # Prepare data for smoothing
     df_for_smoothing = _prepare_data_for_smoothing(df_raw)
@@ -279,20 +307,21 @@ def _render_chart_internal(
         if valid_data is None or valid_data.empty:
             continue
         
-        # Get actual market cap values for tooltip (from smoothed data)
-        actual_mc = None
-        if sym in df_s.columns:
-            # Align market cap values with valid_data dates
-            actual_mc = df_s.loc[valid_data.index, sym] if not valid_data.empty else None
+        # Get price data for tooltip
+        price_data = None
+        if sym in prices_dict:
+            price_series = prices_dict[sym]
+            # Align prices with valid_data dates
+            price_data = price_series.reindex(valid_data.index)
         
-        # Prepare customdata for hover (actual market cap values)
+        # Prepare customdata for hover (price values)
         customdata_list = None
-        if actual_mc is not None and not actual_mc.empty:
-            customdata_list = actual_mc.values
+        if price_data is not None and not price_data.empty:
+            customdata_list = price_data.values
         
         # Build hovertemplate
         if normalized_view:
-            # For normalized views, show both index and actual market cap
+            # For normalized views, show both index and price
             if customdata_list is not None:
                 hovertemplate = (
                     f"<b>{sym}</b> — {cat}<br>"
@@ -301,7 +330,7 @@ def _render_chart_internal(
                     f"View: {view}<br>"
                     "Date: %{x}<br>"
                     "Index: %{y:.2f}<br>"
-                    "Market Cap: %{customdata:,.0f} USD<extra></extra>"
+                    "Price: $%{customdata:,.2f}<extra></extra>"
                 )
             else:
                 hovertemplate = (
@@ -313,15 +342,26 @@ def _render_chart_internal(
                     "Index: %{y:.2f}<extra></extra>"
                 )
         else:
-            # For market cap view, just show market cap
-            hovertemplate = (
-                f"<b>{sym}</b> — {cat}<br>"
-                f"Group: {grp}<br>"
-                f"Smoothing: {smoothing}<br>"
-                f"View: {view}<br>"
-                "Date: %{x}<br>"
-                "Market Cap: %{y:.3s} USD<extra></extra>"
-            )
+            # For market cap view, show market cap and price
+            if customdata_list is not None:
+                hovertemplate = (
+                    f"<b>{sym}</b> — {cat}<br>"
+                    f"Group: {grp}<br>"
+                    f"Smoothing: {smoothing}<br>"
+                    f"View: {view}<br>"
+                    "Date: %{x}<br>"
+                    "Market Cap: %{y:.3s} USD<br>"
+                    "Price: $%{customdata:,.2f}<extra></extra>"
+                )
+            else:
+                hovertemplate = (
+                    f"<b>{sym}</b> — {cat}<br>"
+                    f"Group: {grp}<br>"
+                    f"Smoothing: {smoothing}<br>"
+                    f"View: {view}<br>"
+                    "Date: %{x}<br>"
+                    "Market Cap: %{y:.3s} USD<extra></extra>"
+                )
         
         # Add trace to figure
         trace_kwargs = {
