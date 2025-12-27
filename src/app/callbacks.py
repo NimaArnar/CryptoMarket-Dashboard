@@ -279,26 +279,66 @@ def _render_chart_internal(
         if valid_data is None or valid_data.empty:
             continue
         
-        # Add trace to figure
-        fig.add_trace(
-            go.Scatter(
-                x=valid_data.index,
-                y=valid_data.values,
-                mode="lines",
-                name=f"{sym} — {cat}",
-                line=dict(color=color_for(sym), width=2),
-                visible=True if sym in selected_set else "legendonly",
-                hovertemplate=(
+        # Get actual market cap values for tooltip (from smoothed data)
+        actual_mc = None
+        if sym in df_s.columns:
+            # Align market cap values with valid_data dates
+            actual_mc = df_s.loc[valid_data.index, sym] if not valid_data.empty else None
+        
+        # Prepare customdata for hover (actual market cap values)
+        customdata_list = None
+        if actual_mc is not None and not actual_mc.empty:
+            customdata_list = actual_mc.values
+        
+        # Build hovertemplate
+        if normalized_view:
+            # For normalized views, show both index and actual market cap
+            if customdata_list is not None:
+                hovertemplate = (
                     f"<b>{sym}</b> — {cat}<br>"
                     f"Group: {grp}<br>"
                     f"Smoothing: {smoothing}<br>"
                     f"View: {view}<br>"
                     "Date: %{x}<br>"
-                    + ("Index: %{y:.2f}" if normalized_view else "Market Cap: %{y:.3s} USD")
-                    + "<extra></extra>"
-                ),
+                    "Index: %{y:.2f}<br>"
+                    "Market Cap: %{customdata:,.0f} USD<extra></extra>"
+                )
+            else:
+                hovertemplate = (
+                    f"<b>{sym}</b> — {cat}<br>"
+                    f"Group: {grp}<br>"
+                    f"Smoothing: {smoothing}<br>"
+                    f"View: {view}<br>"
+                    "Date: %{x}<br>"
+                    "Index: %{y:.2f}<extra></extra>"
+                )
+        else:
+            # For market cap view, just show market cap
+            hovertemplate = (
+                f"<b>{sym}</b> — {cat}<br>"
+                f"Group: {grp}<br>"
+                f"Smoothing: {smoothing}<br>"
+                f"View: {view}<br>"
+                "Date: %{x}<br>"
+                "Market Cap: %{y:.3s} USD<extra></extra>"
             )
-        )
+        
+        # Add trace to figure
+        trace_kwargs = {
+            "x": valid_data.index,
+            "y": valid_data.values,
+            "mode": "lines",
+            "name": f"{sym} — {cat}",
+            "line": dict(color=color_for(sym), width=2),
+            "visible": True if sym in selected_set else "legendonly",
+            "hovertemplate": hovertemplate,
+        }
+        
+        # Add customdata if available (for normalized views)
+        if customdata_list is not None:
+            trace_kwargs["customdata"] = customdata_list
+        
+        fig.add_trace(go.Scatter(**trace_kwargs))
     
     fig.update_layout(
         title=f"{view} | {smoothing} | Group: {group_choice}",
