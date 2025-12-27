@@ -51,15 +51,23 @@ def create_layout(coin_status: dict, default_selected: list) -> html.Div:
             dcc.Graph(id="chart", style={"height": "75vh", "marginTop": "20px"}),
             
             html.Div(
+                id="scatter-container",
                 style={
                     "marginTop": "20px",
-                    "fontWeight": "600",
-                    "fontSize": "16px",
-                    "color": "#2c3e50"
                 },
-                children="Returns Scatter (Coin A vs Coin B)"
+                children=[
+                    html.Div(
+                        style={
+                            "fontWeight": "600",
+                            "fontSize": "16px",
+                            "color": "#2c3e50",
+                            "marginBottom": "10px"
+                        },
+                        children="Returns Scatter (Coin A vs Coin B)"
+                    ),
+                    dcc.Graph(id="scatter", style={"height": "50vh", "marginTop": "10px"}),
+                ]
             ),
-            dcc.Graph(id="scatter", style={"height": "35vh", "marginTop": "10px"}),
             
             html.Div(
                 style={

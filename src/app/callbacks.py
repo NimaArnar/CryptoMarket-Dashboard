@@ -176,13 +176,52 @@ def register_callbacks(app, data_manager: DataManager) -> None:
     @app.callback(
         Output("corr-output", "children"),
         Output("scatter", "figure"),
+        Output("scatter-container", "style"),  # Control visibility
         Input("state", "data"),
         Input("selected", "data"),
         Input("order", "data"),
     )
     def corr_and_scatter(state, selected_syms, order):
         """Calculate correlation and render scatter plot."""
-        return _corr_and_scatter_internal(state, selected_syms, order, df_raw)
+        corr_text, scatter_fig = _corr_and_scatter_internal(state, selected_syms, order, df_raw)
+        
+        # Check if exactly 2 coins are selected
+        allowed = set(order or [])
+        sel = [s for s in (selected_syms or []) if s in allowed]
+        show_scatter = len(sel) == 2
+        
+        # Hide scatter container if not exactly 2 coins
+        container_style = {
+            "marginTop": "20px",
+            "display": "block" if show_scatter else "none"
+        }
+        
+        return corr_text, scatter_fig, container_style
+
+
+def _load_price_data() -> Dict[str, pd.Series]:
+    """Load price data from cache files for all coins."""
+    from src.config import CACHE_DIR, DAYS_HISTORY, VS_CURRENCY
+    from src.constants import COINS
+    
+    prices_dict = {}
+    
+    for coin_id, sym, _, _ in COINS:
+        cache_path = CACHE_DIR / f"{coin_id}_{DAYS_HISTORY}d_{VS_CURRENCY}.json"
+        if cache_path.exists():
+            try:
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    js = json.load(f)
+                
+                if "prices" in js and js["prices"]:
+                    df_prices = pd.DataFrame(js["prices"], columns=["ts", "price"])
+                    df_prices["date"] = pd.to_datetime(df_prices["ts"], unit="ms").dt.floor("D")
+                    df_prices = df_prices.sort_values("ts").groupby("date", as_index=False).last()
+                    prices_dict[sym] = df_prices.set_index("date")["price"].sort_index()
+            except Exception as e:
+                logger.warning(f"Failed to load price data for {sym}: {e}")
+    
+    return prices_dict
 
 
 def _render_chart_internal(
@@ -210,6 +249,9 @@ def _render_chart_internal(
     selected_set = set(selected_syms or [])
     
     logger.debug(f"Rendering chart: View={view}, Smoothing={smoothing}, Group={group_choice}")
+    
+    # Load price data for tooltips
+    prices_dict = _load_price_data()
     
     # Prepare data for smoothing
     df_for_smoothing = _prepare_data_for_smoothing(df_raw)
@@ -279,26 +321,78 @@ def _render_chart_internal(
         if valid_data is None or valid_data.empty:
             continue
         
-        # Add trace to figure
-        fig.add_trace(
-            go.Scatter(
-                x=valid_data.index,
-                y=valid_data.values,
-                mode="lines",
-                name=f"{sym} — {cat}",
-                line=dict(color=color_for(sym), width=2),
-                visible=True if sym in selected_set else "legendonly",
-                hovertemplate=(
+        # Get price data for tooltip
+        price_data = None
+        if sym in prices_dict:
+            price_series = prices_dict[sym]
+            # Align prices with valid_data dates
+            price_data = price_series.reindex(valid_data.index)
+        
+        # Prepare customdata for hover (price values)
+        customdata_list = None
+        if price_data is not None and not price_data.empty:
+            customdata_list = price_data.values
+        
+        # Build hovertemplate
+        if normalized_view:
+            # For normalized views, show both index and price
+            if customdata_list is not None:
+                hovertemplate = (
                     f"<b>{sym}</b> — {cat}<br>"
                     f"Group: {grp}<br>"
                     f"Smoothing: {smoothing}<br>"
                     f"View: {view}<br>"
                     "Date: %{x}<br>"
-                    + ("Index: %{y:.2f}" if normalized_view else "Market Cap: %{y:.3s} USD")
-                    + "<extra></extra>"
-                ),
-            )
-        )
+                    "Index: %{y:.2f}<br>"
+                    "Price: $%{customdata:,.2f}<extra></extra>"
+                )
+            else:
+                hovertemplate = (
+                    f"<b>{sym}</b> — {cat}<br>"
+                    f"Group: {grp}<br>"
+                    f"Smoothing: {smoothing}<br>"
+                    f"View: {view}<br>"
+                    "Date: %{x}<br>"
+                    "Index: %{y:.2f}<extra></extra>"
+                )
+        else:
+            # For market cap view, show market cap and price
+            if customdata_list is not None:
+                hovertemplate = (
+                    f"<b>{sym}</b> — {cat}<br>"
+                    f"Group: {grp}<br>"
+                    f"Smoothing: {smoothing}<br>"
+                    f"View: {view}<br>"
+                    "Date: %{x}<br>"
+                    "Market Cap: %{y:.3s} USD<br>"
+                    "Price: $%{customdata:,.2f}<extra></extra>"
+                )
+            else:
+                hovertemplate = (
+                    f"<b>{sym}</b> — {cat}<br>"
+                    f"Group: {grp}<br>"
+                    f"Smoothing: {smoothing}<br>"
+                    f"View: {view}<br>"
+                    "Date: %{x}<br>"
+                    "Market Cap: %{y:.3s} USD<extra></extra>"
+                )
+        
+        # Add trace to figure
+        trace_kwargs = {
+            "x": valid_data.index,
+            "y": valid_data.values,
+            "mode": "lines",
+            "name": f"{sym} — {cat}",
+            "line": dict(color=color_for(sym), width=2),
+            "visible": True if sym in selected_set else "legendonly",
+            "hovertemplate": hovertemplate,
+        }
+        
+        # Add customdata if available (for normalized views)
+        if customdata_list is not None:
+            trace_kwargs["customdata"] = customdata_list
+        
+        fig.add_trace(go.Scatter(**trace_kwargs))
     
     fig.update_layout(
         title=f"{view} | {smoothing} | Group: {group_choice}",

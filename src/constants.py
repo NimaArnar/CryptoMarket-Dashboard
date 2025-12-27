@@ -40,7 +40,7 @@ COINS: List[Tuple[str, str, str, str]] = [
 ]
 
 # Default UI Settings
-DEFAULT_GROUP = "infra+memes"
+DEFAULT_GROUP = "all"  # Show all coins by default (group buttons removed from UI)
 DEFAULT_SMOOTHING = "7D SMA"
 DEFAULT_VIEW = "Normalized (Linear)"  # Options: "Normalized (Linear)" | "Normalized (Log)" | "Market Cap (Log)"
 DEFAULT_CORR_MODE = "returns"  # Options: "off" | "returns" | "levels"

@@ -11,6 +11,7 @@ An interactive web dashboard for visualizing cryptocurrency market cap data usin
 - ⚡ **Fast Data Loading**: Async parallel fetching for faster startup times
 - 💾 **Caching**: 24-hour cache to minimize API calls
 - 📁 **Excel Export**: Export market cap data to Excel files
+- 🎨 **Modern UI**: Clean, intuitive interface with improved button styling and larger charts
 
 ## Installation
 
@@ -49,19 +50,19 @@ For higher rate limits, you can use a CoinGecko Pro API key:
 **Windows PowerShell:**
 ```powershell
 $env:COINGECKO_API_KEY="your-api-key-here"
-python crypto_market_cap_dashboard.py
+python main.py
 ```
 
 **Windows CMD:**
 ```cmd
 set COINGECKO_API_KEY=your-api-key-here
-python crypto_market_cap_dashboard.py
+python main.py
 ```
 
 **Linux/Mac:**
 ```bash
 export COINGECKO_API_KEY="your-api-key-here"
-python crypto_market_cap_dashboard.py
+python main.py
 ```
 
 ## Configuration
@@ -84,7 +85,7 @@ $env:USE_ASYNC_FETCH="false"
 # Increase concurrent requests (if you have Pro API)
 $env:MAX_CONCURRENT_REQUESTS="10"
 
-python crypto_market_cap_dashboard.py
+python main.py
 ```
 
 ## Project Structure
@@ -170,6 +171,20 @@ If you hit rate limits:
 - Clear browser cache
 - Check console output for error messages
 - Check log file in `./logs/` directory
+
+## Recent Updates
+
+### UI Improvements (Latest)
+- **Modern Button Design**: Clean, modern button styling with better spacing and visual hierarchy
+- **Larger Charts**: Increased chart height from 62vh to 75vh for better data visibility
+- **Improved Layout**: Better color scheme, spacing, and overall visual design
+- **Simplified Controls**: Streamlined control panel with organized sections
+- **Better Error Handling**: Improved logging and error messages for debugging
+
+### Bug Fixes
+- Fixed coin count display when switching between views (correctly shows 27 coins for Market Cap view, 28 for normalized views)
+- Fixed chart rendering issues on initial page load
+- Improved selected coin filtering to match current view/order
 
 ## Performance
 
