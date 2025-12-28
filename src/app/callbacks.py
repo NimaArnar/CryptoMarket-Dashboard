@@ -750,11 +750,11 @@ def _corr_and_scatter_internal(
         if beta is not None:
             implied_move = beta * 10
             text = (
-                f"Correlation (daily returns) — {a} vs {b}: {corr:.3f} | "
+                f"Correlation (daily returns) — {a} vs {b}: {corr*100:.1f}% | "
                 f"beta={beta:.2f} (if {a} +10%, {b} ≈ {implied_move:+.1f}%)"
             )
         else:
-            text = f"Correlation (daily returns) — {a} vs {b}: {corr:.3f}"
+            text = f"Correlation (daily returns) — {a} vs {b}: {corr*100:.1f}%"
         return text, scat
     
     # Levels mode: correlate indexed levels
@@ -765,11 +765,11 @@ def _corr_and_scatter_internal(
     if beta is not None:
         implied_move = beta * 10
         text = (
-            f"Correlation (indexed levels) — {a} vs {b}: {corr:.3f} | "
+            f"Correlation (indexed levels) — {a} vs {b}: {corr*100:.1f}% | "
             f"beta={beta:.2f} (if {a} +10%, {b} ≈ {implied_move:+.1f}%)"
         )
     else:
-        text = f"Correlation (indexed levels) — {a} vs {b}: {corr:.3f}"
+        text = f"Correlation (indexed levels) — {a} vs {b}: {corr*100:.1f}%"
     
     return text, scat
 

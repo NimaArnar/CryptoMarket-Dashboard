@@ -109,8 +109,9 @@ def create_returns_scatter(
     )
     
     corr_label = "corr" if corr_type == "returns" else "levels corr"
+    corr_percent = corr * 100
     fig.update_layout(
-        title=f"Returns scatter — {symbol_a} vs {symbol_b} | {corr_label}={corr:.3f}",
+        title=f"Returns scatter — {symbol_a} vs {symbol_b} | {corr_label}={corr_percent:.1f}%",
         xaxis_title=f"{symbol_a} daily return",
         yaxis_title=f"{symbol_b} daily return",
         margin=dict(t=40, r=30, l=60, b=50),
