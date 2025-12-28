@@ -13,6 +13,9 @@ on:
       - 'main.py'
       - '.github/workflows/generate-static-dashboard.yml'
 
+permissions:
+  contents: write  # Required to push to gh-pages branch
+
 jobs:
   generate-dashboard:
     runs-on: ubuntu-latest
@@ -41,4 +44,5 @@ jobs:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         publish_dir: ./docs
         cname: false
+        keep_files: false
 
