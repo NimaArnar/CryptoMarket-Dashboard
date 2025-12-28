@@ -72,25 +72,31 @@ def generate_html(data_manager: DataManager) -> str:
         # Extract series (same logic as main app)
         data_series = df_normalized[coin]
         
-        # Drop NaN values
+        # Drop NaN values and zeros
         valid_data = data_series.dropna()
         if valid_data.empty:
-            logger.warning(f"{coin}: Series is empty after dropna()")
             continue
         
-        # Remove zeros at the start (same as main app)
-        non_zero_mask = valid_data != 0
-        if non_zero_mask.any():
-            first_non_zero_idx = valid_data[non_zero_mask].index[0]
-            valid_data = valid_data.loc[valid_data.index >= first_non_zero_idx]
-        
+        # Remove zeros (both at start and throughout)
+        valid_data = valid_data[valid_data != 0]
         if valid_data.empty:
             continue
         
-        # Ensure first value is exactly 100 (fix any floating point issues)
+        # Find the first index where value should be 100 (after normalization)
+        # The normalize_start100 function sets values before first_valid_idx to NaN
+        # So after dropna(), the first value should be at the normalization baseline
+        # But we need to ensure it's exactly 100
+        first_idx = valid_data.index[0]
         first_val = valid_data.iloc[0]
+        
+        # Re-normalize to ensure first value is exactly 100
+        # This handles any floating point precision issues
         if abs(first_val - 100) > 0.01:
             valid_data = (valid_data / first_val) * 100
+        
+        # Verify first value is now 100
+        if abs(valid_data.iloc[0] - 100) > 0.01:
+            logger.warning(f"{coin}: First value is {valid_data.iloc[0]:.2f}, expected 100")
         
         fig_btc_eth.add_trace(go.Scatter(
             x=valid_data.index,
