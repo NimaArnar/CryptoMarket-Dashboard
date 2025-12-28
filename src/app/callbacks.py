@@ -721,10 +721,18 @@ def _corr_and_scatter_internal(
     
     a, b = sel[0], sel[1]
     
-    df_s = apply_smoothing(df_raw, smoothing)
+    # Prepare data for smoothing (same as chart rendering)
+    df_for_smoothing = _prepare_data_for_smoothing(df_raw)
     
-    sA = series_for_symbol(a, df_s, view)
-    sB = series_for_symbol(b, df_s, view)
+    # Apply smoothing
+    df_s = apply_smoothing(df_for_smoothing, smoothing)
+    
+    # Apply view transformation (normalization if needed) - same as chart rendering
+    df_plot, _, _, normalized_view = _prepare_plot_data(df_s, view)
+    
+    # Get series from normalized/transformed data
+    sA = series_for_symbol(a, df_plot, view)
+    sB = series_for_symbol(b, df_plot, view)
     
     if sA is None or sB is None:
         return f"Cannot compute series for {a} or {b} in this view.", empty_fig
