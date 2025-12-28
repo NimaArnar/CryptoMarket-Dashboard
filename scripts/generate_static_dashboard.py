@@ -67,36 +67,43 @@ def generate_html(data_manager: DataManager) -> str:
     
     for coin in ["BTC", "ETH"]:
         if coin not in df_normalized.columns:
+            logger.warning(f"{coin}: Not found in df_normalized.columns")
             continue
         
-        # Extract series (same logic as main app)
-        data_series = df_normalized[coin]
+        # Extract series from normalized dataframe
+        data_series = df_normalized[coin].copy()
         
-        # Drop NaN values and zeros
-        valid_data = data_series.dropna()
+        # Find first non-NaN, non-zero value (this should be the baseline = 100)
+        mask_valid = (~pd.isna(data_series)) & (data_series != 0)
+        if not mask_valid.any():
+            logger.warning(f"{coin}: No valid (non-zero, non-NaN) data found")
+            continue
+        
+        # Get first valid index
+        first_valid_idx = data_series[mask_valid].index[0]
+        first_valid_val = data_series.loc[first_valid_idx]
+        
+        # Filter: only keep data from first_valid_idx onwards, and exclude zeros
+        valid_data = data_series.loc[data_series.index >= first_valid_idx]
+        valid_data = valid_data[valid_data != 0].dropna()
+        
         if valid_data.empty:
+            logger.warning(f"{coin}: No valid data after filtering")
             continue
         
-        # Remove zeros (both at start and throughout)
-        valid_data = valid_data[valid_data != 0]
-        if valid_data.empty:
-            continue
-        
-        # Find the first index where value should be 100 (after normalization)
-        # The normalize_start100 function sets values before first_valid_idx to NaN
-        # So after dropna(), the first value should be at the normalization baseline
-        # But we need to ensure it's exactly 100
-        first_idx = valid_data.index[0]
+        # Ensure first value is exactly 100 (re-normalize if needed)
         first_val = valid_data.iloc[0]
-        
-        # Re-normalize to ensure first value is exactly 100
-        # This handles any floating point precision issues
         if abs(first_val - 100) > 0.01:
+            logger.info(f"{coin}: Re-normalizing from {first_val:.2f} to 100")
             valid_data = (valid_data / first_val) * 100
         
-        # Verify first value is now 100
+        # Final check: first value must be 100
         if abs(valid_data.iloc[0] - 100) > 0.01:
-            logger.warning(f"{coin}: First value is {valid_data.iloc[0]:.2f}, expected 100")
+            logger.error(f"{coin}: First value is {valid_data.iloc[0]:.2f}, expected 100.0")
+            # Force it to 100
+            valid_data.iloc[0] = 100.0
+        
+        logger.info(f"{coin}: Added trace with {len(valid_data)} points, first={valid_data.iloc[0]:.2f}")
         
         fig_btc_eth.add_trace(go.Scatter(
             x=valid_data.index,
