@@ -56,23 +56,50 @@ def generate_html(data_manager: DataManager) -> str:
     from src.data.transformer import normalize_start100, apply_smoothing
     from src.visualization import series_for_symbol
     
+    # Apply smoothing
     df_smoothed = apply_smoothing(df_raw, "7D SMA")
+    
+    # Normalize to start at 100 (same as main app)
     df_normalized = normalize_start100(df_smoothed)
     
     # Chart 1: BTC and ETH normalized view
     fig_btc_eth = go.Figure()
     
     for coin in ["BTC", "ETH"]:
-        if coin in df_normalized.columns:
-            series = df_normalized[coin].dropna()
-            if not series.empty:
-                fig_btc_eth.add_trace(go.Scatter(
-                    x=series.index,
-                    y=series.values,
-                    mode="lines",
-                    name=coin,
-                    line=dict(width=3)
-                ))
+        if coin not in df_normalized.columns:
+            continue
+        
+        # Extract series (same logic as main app)
+        data_series = df_normalized[coin]
+        
+        # Drop NaN values
+        valid_data = data_series.dropna()
+        if valid_data.empty:
+            logger.warning(f"{coin}: Series is empty after dropna()")
+            continue
+        
+        # Remove zeros at the start (same as main app)
+        non_zero_mask = valid_data != 0
+        if non_zero_mask.any():
+            first_non_zero_idx = valid_data[non_zero_mask].index[0]
+            valid_data = valid_data.loc[valid_data.index >= first_non_zero_idx]
+        
+        if valid_data.empty:
+            logger.warning(f"{coin}: Series is empty after removing zeros")
+            continue
+        
+        # Ensure first value is exactly 100 (fix any floating point issues)
+        first_val = valid_data.iloc[0]
+        if abs(first_val - 100) > 0.01:
+            valid_data = (valid_data / first_val) * 100
+        
+        fig_btc_eth.add_trace(go.Scatter(
+            x=valid_data.index,
+            y=valid_data.values,
+            mode="lines",
+            name=coin,
+            line=dict(width=3)
+        ))
     
     fig_btc_eth.update_layout(
         title="BTC vs ETH - Normalized Market Cap (100 = first value)",
@@ -89,47 +116,58 @@ def generate_html(data_manager: DataManager) -> str:
     corr_value = None
     beta_value = None
     
-    if "BTC" in df_smoothed.columns and "ETH" in df_smoothed.columns:
-        s_btc = series_for_symbol("BTC", df_smoothed, "Normalized (Linear)")
-        s_eth = series_for_symbol("ETH", df_smoothed, "Normalized (Linear)")
+    if "BTC" in df_normalized.columns and "ETH" in df_normalized.columns:
+        # Use normalized data (same as main app for correlation)
+        s_btc = df_normalized["BTC"].dropna()
+        s_eth = df_normalized["ETH"].dropna()
         
-        if s_btc is not None and s_eth is not None:
-            # Align by date
-            df_aligned = pd.concat([s_btc.rename("BTC"), s_eth.rename("ETH")], axis=1, join="inner").dropna()
+        # Remove zeros at the start
+        non_zero_mask_btc = s_btc != 0
+        if non_zero_mask_btc.any():
+            first_non_zero_idx_btc = s_btc[non_zero_mask_btc].index[0]
+            s_btc = s_btc.loc[s_btc.index >= first_non_zero_idx_btc]
+        
+        non_zero_mask_eth = s_eth != 0
+        if non_zero_mask_eth.any():
+            first_non_zero_idx_eth = s_eth[non_zero_mask_eth].index[0]
+            s_eth = s_eth.loc[s_eth.index >= first_non_zero_idx_eth]
+        
+        # Align by date (inner join)
+        df_aligned = pd.concat([s_btc.rename("BTC"), s_eth.rename("ETH")], axis=1, join="inner").dropna()
+        
+        if df_aligned.shape[0] >= 10:
+            # Calculate returns from normalized data
+            rets = df_aligned.pct_change().dropna()
             
-            if df_aligned.shape[0] >= 10:
-                # Calculate returns
-                rets = df_aligned.pct_change().dropna()
+            if not rets.empty and len(rets) > 0:
+                # Calculate correlation
+                corr_value = rets["BTC"].corr(rets["ETH"])
                 
-                if not rets.empty and len(rets) > 0:
-                    # Calculate correlation
-                    corr_value = rets["BTC"].corr(rets["ETH"])
-                    
-                    # Calculate beta
-                    if rets["BTC"].var() > 0:
-                        beta_value = rets["ETH"].cov(rets["BTC"]) / rets["BTC"].var()
-                    
-                    # Create scatter plot
-                    fig_corr = go.Figure()
-                    fig_corr.add_trace(go.Scatter(
-                        x=rets["BTC"] * 100,  # Convert to percentage
-                        y=rets["ETH"] * 100,  # Convert to percentage
-                        mode="markers",
-                        name="Daily Returns",
-                        marker=dict(size=6, opacity=0.6, color="rgba(31, 119, 180, 0.6)")
-                    ))
-                    
-                    corr_percent = corr_value * 100 if corr_value else 0
-                    fig_corr.update_layout(
-                        title=f"BTC vs ETH Correlation - Returns Scatter (corr={corr_percent:.1f}%)",
-                        xaxis_title="BTC Daily Return (%)",
-                        yaxis_title="ETH Daily Return (%)",
-                        xaxis=dict(tickformat=".1%"),
-                        yaxis=dict(tickformat=".1%"),
-                        height=500,
-                        template="plotly_white",
-                        hovermode="closest"
-                    )
+                # Calculate beta
+                if rets["BTC"].var() > 0:
+                    beta_value = rets["ETH"].cov(rets["BTC"]) / rets["BTC"].var()
+                
+                # Create scatter plot
+                fig_corr = go.Figure()
+                fig_corr.add_trace(go.Scatter(
+                    x=rets["BTC"] * 100,  # Convert to percentage
+                    y=rets["ETH"] * 100,  # Convert to percentage
+                    mode="markers",
+                    name="Daily Returns",
+                    marker=dict(size=6, opacity=0.6, color="rgba(31, 119, 180, 0.6)")
+                ))
+                
+                corr_percent = corr_value * 100 if corr_value else 0
+                fig_corr.update_layout(
+                    title=f"BTC vs ETH Correlation - Returns Scatter (corr={corr_percent:.1f}%)",
+                    xaxis_title="BTC Daily Return (%)",
+                    yaxis_title="ETH Daily Return (%)",
+                    xaxis=dict(tickformat=".1%"),
+                    yaxis=dict(tickformat=".1%"),
+                    height=500,
+                    template="plotly_white",
+                    hovermode="closest"
+                )
     
     # Convert figures to JSON
     fig_btc_eth_json = json.dumps(fig_btc_eth, cls=PlotlyJSONEncoder)
