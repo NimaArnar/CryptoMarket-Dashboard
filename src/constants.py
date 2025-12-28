@@ -20,7 +20,6 @@ COINS: List[Tuple[str, str, str, str]] = [
     ("1inch", "1INCH", "Aggregators", "defi"),
     ("aave", "AAVE", "Lending / Borrowing", "defi"),
     ("tether", "USDT", "Stablecoins", "defi"),
-    ("dydx", "DYDX", "Derivatives", "defi"),
     ("lido-dao", "LDO", "Liquid Staking (LSD/LRT)", "defi"),
     ("yearn-finance", "YFI", "Yield / Vaults", "defi"),
     ("sky", "SKY", "CDPs (Maker → Sky)", "defi"),
@@ -29,7 +28,6 @@ COINS: List[Tuple[str, str, str, str]] = [
     # Consumer
     ("apecoin", "APE", "NFTs (collectibles / art)", "consumer"),
     ("blur", "BLUR", "NFT marketplaces", "consumer"),
-    ("immutable-x", "IMX", "Gaming NFTs / Game assets", "consumer"),
     ("decentraland", "MANA", "Metaverse / virtual worlds", "consumer"),
     ("cyberconnect", "CYBER", "SocialFi", "consumer"),
     ("chiliz", "CHZ", "Fan tokens", "consumer"),

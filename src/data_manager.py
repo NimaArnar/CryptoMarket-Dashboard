@@ -135,70 +135,9 @@ class DataManager:
     
     def _create_dataframe(self) -> None:
         """Create DataFrame from series and add pseudo series."""
-        # Verify DYDX has fixed data
-        if "DYDX" in self.series:
-            apr4_check = pd.Timestamp("2025-04-04")
-            if apr4_check in self.series["DYDX"].index:
-                apr4_mc_check = self.series["DYDX"].loc[apr4_check]
-                if apr4_mc_check < 200_000_000:
-                    logger.warning("DYDX data appears corrupted, re-fetching...")
-                    self.series["DYDX"] = fetch_market_caps_retry("dydx")
-        
         self.df_raw = pd.DataFrame(self.series).sort_index().ffill()
-        
-        # Final check and fix for DYDX if needed
-        self._verify_dydx_fix()
         
         # Add pseudo series (USDT.D)
         self.meta[DOM_SYM] = (DOM_CAT, DOM_GRP)
         self.symbols_all = list(self.df_raw.columns) + [DOM_SYM]
-    
-    def _verify_dydx_fix(self) -> None:
-        """Verify and fix DYDX data if corrupted."""
-        if "DYDX" not in self.df_raw.columns:
-            return
-        
-        apr4_final = pd.Timestamp("2025-04-04")
-        apr2_final = pd.Timestamp("2025-04-02")
-        needs_fix = False
-        
-        if apr4_final in self.df_raw.index:
-            apr4_mc_final = self.df_raw.loc[apr4_final, "DYDX"]
-            if apr4_mc_final < 200_000_000:
-                needs_fix = True
-        
-        if needs_fix:
-            cache_path = CACHE_DIR / "dydx_365d_usd.json"
-            if cache_path.exists():
-                with open(cache_path, "r", encoding="utf-8") as f:
-                    js = json.load(f)
-                if "prices" in js and js["prices"]:
-                    df_prices = pd.DataFrame(js["prices"], columns=["ts", "price"])
-                    df_prices["date"] = pd.to_datetime(df_prices["ts"], unit="ms").dt.floor("D")
-                    df_prices = df_prices.sort_values("ts").groupby("date", as_index=False).last()
-                    prices_fix = df_prices.set_index("date")["price"].sort_index()
-                    
-                    # Calculate last correct Q value
-                    break_date_fix = apr2_final
-                    before_break = self.df_raw.index[self.df_raw.index < break_date_fix]
-                    if len(before_break) > 0:
-                        last_correct_date = before_break[-1]
-                        if last_correct_date in prices_fix.index:
-                            last_mc = self.df_raw.loc[last_correct_date, "DYDX"]
-                            last_price = prices_fix.loc[last_correct_date]
-                            if last_price > 0 and last_mc > 0:
-                                q_baseline_fix = last_mc / last_price
-                                
-                                dates_to_fix = self.df_raw.index[self.df_raw.index >= break_date_fix]
-                                for dt in dates_to_fix:
-                                    if dt in prices_fix.index:
-                                        price_dt = prices_fix.loc[dt]
-                                        if pd.notna(price_dt) and price_dt > 0:
-                                            mc_fixed = q_baseline_fix * price_dt
-                                            self.df_raw.loc[dt, "DYDX"] = mc_fixed
-                                
-                                logger.warning(
-                                    f"EMERGENCY FIX: Corrected DYDX data in df_raw "
-                                    f"(Apr4 was {apr4_mc_final:,.0f})"
-                                )
 

@@ -1,5 +1,5 @@
 """Dash application layout."""
-from dash import dcc, html
+from dash import dcc, html, dash_table
 
 from src.constants import DEFAULT_CORR_MODE, DEFAULT_GROUP, DEFAULT_SMOOTHING, DEFAULT_VIEW, DOM_SYM
 
@@ -46,9 +46,48 @@ def create_layout(coin_status: dict, default_selected: list) -> html.Div:
             dcc.Store(id="selected", data=default_selected),
             dcc.Store(id="order", data=[]),
             
-            _create_controls_div(),
+            html.Div(id="controls-container", children=_create_controls_div()),
             
-            dcc.Graph(id="chart", style={"height": "75vh", "marginTop": "20px"}),
+            dcc.Tabs(
+                id="main-tabs",
+                value="chart-tab",
+                style={
+                    "marginTop": "20px",
+                    "borderBottom": "1px solid #dee2e6"
+                },
+                children=[
+                    dcc.Tab(
+                        label="Charts",
+                        value="chart-tab",
+                        style={
+                            "padding": "12px 24px",
+                            "fontWeight": "500",
+                            "fontSize": "15px"
+                        },
+                        selected_style={
+                            "backgroundColor": "#007bff",
+                            "color": "#ffffff",
+                            "borderTop": "2px solid #007bff"
+                        }
+                    ),
+                    dcc.Tab(
+                        label="Latest Data",
+                        value="data-tab",
+                        style={
+                            "padding": "12px 24px",
+                            "fontWeight": "500",
+                            "fontSize": "15px"
+                        },
+                        selected_style={
+                            "backgroundColor": "#007bff",
+                            "color": "#ffffff",
+                            "borderTop": "2px solid #007bff"
+                        }
+                    )
+                ]
+            ),
+            
+            html.Div(id="tab-content", style={"marginTop": "20px"}),
             
             html.Div(
                 id="scatter-container",
@@ -247,6 +286,29 @@ def _create_controls_div() -> html.Div:
                             "backgroundColor": "#f8f9fa",
                             "borderRadius": "4px"
                         }
+                    ),
+                ]
+            ),
+            html.Div(
+                style={"display": "flex", "flexDirection": "column", "gap": "8px"},
+                children=[
+                    html.Div(
+                        "Selection",
+                        style={
+                            "fontWeight": "600",
+                            "fontSize": "13px",
+                            "color": "#6c757d",
+                            "textTransform": "uppercase",
+                            "letterSpacing": "0.5px",
+                            "marginBottom": "4px"
+                        }
+                    ),
+                    html.Div(
+                        style={"display": "flex", "flexWrap": "wrap", "gap": "4px"},
+                        children=[
+                            html.Button("Select All", id="btn-select-all", style=button_style),
+                            html.Button("Unselect All", id="btn-unselect-all", style=button_style),
+                        ]
                     ),
                 ]
             ),

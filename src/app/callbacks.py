@@ -5,7 +5,8 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Input, Output, State, ctx
+from dash import Input, Output, State, ctx, html, dcc
+from dash import dash_table
 
 from src.config import CACHE_DIR, MIN_CORR_DAYS
 from src.constants import (
@@ -17,7 +18,7 @@ from src.constants import (
     DOM_SYM,
     MIN_MARKET_CAP_FOR_VALID,
 )
-from src.data import apply_smoothing, find_dydx_baseline_date, group_filter, normalize_start100, symbols_for_view
+from src.data import apply_smoothing, group_filter, normalize_start100, symbols_for_view
 from src.data_manager import DataManager
 from src.utils import setup_logger
 from src.visualization import color_for, compute_usdt_d_index, create_returns_scatter, series_for_symbol
@@ -64,6 +65,8 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         Input("btn-corr-off", "n_clicks"),
         Input("btn-corr-ret", "n_clicks"),
         Input("btn-corr-lvl", "n_clicks"),
+        Input("btn-select-all", "n_clicks"),
+        Input("btn-unselect-all", "n_clicks"),
         Input("chart", "restyleData"),
         State("state", "data"),
         State("selected", "data"),
@@ -74,6 +77,7 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         n_s0, n_s7, n_s14, n_s30,
         n_v_lin, n_v_log, n_v_mc,
         n_c_off, n_c_ret, n_c_lvl,
+        n_select_all, n_unselect_all,
         restyle,
         state, selected, order
     ):
@@ -111,8 +115,13 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         elif trig == "btn-corr-lvl":
             new_state["corr_mode"] = "levels"
         
-        # Bulk selection buttons removed from UI
-        # Users can still use legend clicks to toggle coins
+        # Selection buttons
+        elif trig == "btn-select-all":
+            # Select all will be handled after order calculation
+            pass
+        elif trig == "btn-unselect-all":
+            # Unselect all will be handled after order calculation
+            selected_set = set()
         
         # Legend click persistence
         elif trig == "chart" and restyle and order:
@@ -142,6 +151,14 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         group_syms = group_filter(symbols_all, meta, current_group)
         current_order = symbols_for_view(group_syms, current_view)
         
+        # Handle select all / unselect all
+        if trig == "btn-select-all":
+            # Select all coins in current order
+            selected_set = set(current_order) if current_order else set()
+        elif trig == "btn-unselect-all":
+            # Already set to empty set above
+            pass
+        
         # Restrict selected to current order (use recalculated order, not old one)
         if current_order:
             allowed = set(current_order)
@@ -157,13 +174,35 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         return new_state, ordered_selected
     
     @app.callback(
+        Output("tab-content", "children"),
+        Output("controls-container", "style"),
+        Input("main-tabs", "value"),
+    )
+    def update_tab_content(active_tab):
+        """Update content based on selected tab and control visibility."""
+        if active_tab == "chart-tab":
+            chart = dcc.Graph(id="chart", style={"height": "75vh"})
+            controls_style = {"display": "block"}
+            return chart, controls_style
+        elif active_tab == "data-tab":
+            table = _generate_data_table(df_raw, meta, symbols_all)
+            controls_style = {"display": "none"}
+            return table, controls_style
+        return html.Div("Unknown tab"), {"display": "block"}
+    
+    @app.callback(
         Output("chart", "figure"),
         Input("state", "data"),
         Input("selected", "data"),
         Input("order", "data"),
+        Input("main-tabs", "value"),
     )
-    def render_chart(state, selected_syms, order):
+    def render_chart(state, selected_syms, order, active_tab):
         """Render the main chart with all selected coins."""
+        # Only render if chart tab is active
+        if active_tab != "chart-tab":
+            return go.Figure()
+        
         # Filter selected coins to match current order if order is available
         if order and selected_syms:
             filtered_selected = [s for s in selected_syms if s in order]
@@ -197,6 +236,149 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         }
         
         return corr_text, scatter_fig, container_style
+
+
+def _generate_data_table(df_raw: pd.DataFrame, meta: Dict, symbols_all: List[str]) -> html.Div:
+    """Generate a data table showing latest price, Q supply, and market cap for all coins."""
+    if df_raw is None or df_raw.empty:
+        return html.Div("No data available", style={"padding": "20px", "color": "#dc3545"})
+    
+    # Load price data
+    prices_dict = _load_price_data()
+    
+    # Get latest date
+    latest_date = df_raw.index.max()
+    
+    # Prepare data for table
+    table_data = []
+    for sym in sorted(symbols_all):
+        if sym not in df_raw.columns:
+            continue
+        
+        # Get latest market cap
+        mc_series = df_raw[sym].dropna()
+        if mc_series.empty:
+            continue
+        
+        latest_mc = mc_series.iloc[-1]
+        
+        # Get latest price
+        latest_price = None
+        if sym in prices_dict:
+            price_series = prices_dict[sym].dropna()
+            if not price_series.empty:
+                latest_price = price_series.iloc[-1]
+        
+        # Calculate Q supply (MC / Price)
+        q_supply = None
+        if latest_price and latest_price > 0:
+            q_supply = latest_mc / latest_price
+        
+        # Store numeric values for proper sorting, formatting will be done by dash_table
+        table_data.append({
+            "Coin": sym,
+            "Price (USD)": latest_price if latest_price and pd.notna(latest_price) else None,
+            "Q Supply": q_supply if q_supply and pd.notna(q_supply) else None,
+            "Market Cap (USD)": latest_mc if pd.notna(latest_mc) else None
+        })
+    
+    if not table_data:
+        return html.Div("No data available", style={"padding": "20px", "color": "#dc3545"})
+    
+    return html.Div(
+        style={
+            "backgroundColor": "#ffffff",
+            "padding": "20px",
+            "borderRadius": "8px",
+            "boxShadow": "0 2px 4px rgba(0,0,0,0.08)"
+        },
+        children=[
+            html.H3(
+                f"Latest Data (as of {latest_date.strftime('%Y-%m-%d')})",
+                style={
+                    "marginBottom": "20px",
+                    "color": "#2c3e50",
+                    "fontWeight": "600"
+                }
+            ),
+            dash_table.DataTable(
+                data=table_data,
+                columns=[
+                    {"name": "Coin", "id": "Coin", "type": "text"},
+                    {
+                        "name": "Price (USD)", 
+                        "id": "Price (USD)", 
+                        "type": "numeric",
+                        "format": dash_table.Format.Format(
+                            scheme=dash_table.Format.Scheme.fixed,
+                            precision=2
+                        ).symbol_prefix("$")
+                    },
+                    {
+                        "name": "Q Supply", 
+                        "id": "Q Supply", 
+                        "type": "numeric",
+                        "format": dash_table.Format.Format(
+                            scheme=dash_table.Format.Scheme.decimal_integer
+                        )
+                    },
+                    {
+                        "name": "Market Cap (USD)", 
+                        "id": "Market Cap (USD)", 
+                        "type": "numeric",
+                        "format": dash_table.Format.Format(
+                            scheme=dash_table.Format.Scheme.decimal_integer
+                        ).symbol_prefix("$")
+                    }
+                ],
+                style_table={
+                    "overflowX": "auto",
+                    "width": "100%"
+                },
+                style_cell={
+                    "textAlign": "left",
+                    "padding": "12px",
+                    "fontFamily": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+                    "fontSize": "14px",
+                    "border": "1px solid #dee2e6"
+                },
+                style_cell_conditional=[
+                    {
+                        "if": {"column_id": "Price (USD)"},
+                        "textAlign": "right"
+                    },
+                    {
+                        "if": {"column_id": "Q Supply"},
+                        "textAlign": "right"
+                    },
+                    {
+                        "if": {"column_id": "Market Cap (USD)"},
+                        "textAlign": "right"
+                    }
+                ],
+                style_data_conditional=[
+                    {
+                        "if": {"row_index": "odd"},
+                        "backgroundColor": "#f8f9fa"
+                    }
+                ],
+                style_header={
+                    "backgroundColor": "#007bff",
+                    "color": "#ffffff",
+                    "fontWeight": "600",
+                    "textAlign": "center"
+                },
+                style_data={
+                    "backgroundColor": "#ffffff",
+                    "color": "#495057"
+                },
+                sort_action="native",
+                filter_action="native",
+                page_action="native",
+                page_size=20
+            )
+        ]
+    )
 
 
 def _load_price_data() -> Dict[str, pd.Series]:
@@ -258,9 +440,6 @@ def _render_chart_internal(
     
     # Apply smoothing
     df_s = apply_smoothing(df_for_smoothing, smoothing)
-    
-    # Handle DYDX special smoothing (keep Q constant)
-    df_s = _handle_dydx_smoothing(df_s, df_for_smoothing, smoothing)
     
     # Create plot data based on view
     df_plot, yaxis_title, yaxis_type, normalized_view = _prepare_plot_data(df_s, view)
@@ -416,13 +595,6 @@ def _prepare_data_for_smoothing(df_raw: pd.DataFrame) -> pd.DataFrame:
         if valid_mask.any():
             first_valid_idx = col_data[valid_mask].index[0]
             
-            # For DYDX, use Dec 25 as first valid index
-            if col == "DYDX":
-                dec25 = pd.Timestamp("2024-12-25")
-                if dec25 in col_data.index and col_data.loc[dec25] > MIN_MARKET_CAP_FOR_VALID:
-                    first_valid_idx = dec25
-                    logger.info(f"DYDX: Forcing first_valid_idx to Dec 25 (MC={col_data.loc[dec25]:,.0f})")
-            
             # Set all values before first valid to NaN
             mask_before_valid = df_for_smoothing.index < first_valid_idx
             df_for_smoothing.loc[mask_before_valid, col] = pd.NA
@@ -430,84 +602,6 @@ def _prepare_data_for_smoothing(df_raw: pd.DataFrame) -> pd.DataFrame:
             df_for_smoothing[col] = pd.NA
     
     return df_for_smoothing
-
-
-def _handle_dydx_smoothing(
-    df_s: pd.DataFrame,
-    df_for_smoothing: pd.DataFrame,
-    smoothing: str
-) -> pd.DataFrame:
-    """Handle special DYDX smoothing to keep Q constant."""
-    if "DYDX" not in df_for_smoothing.columns or smoothing == "No smoothing":
-        return df_s
-    
-    apr2 = pd.Timestamp("2025-04-02")
-    if apr2 not in df_for_smoothing.index:
-        return df_s
-    
-    apr4_check = pd.Timestamp("2025-04-04")
-    if apr4_check not in df_for_smoothing.index:
-        return df_s
-    
-    apr4_mc_check = df_for_smoothing.loc[apr4_check, "DYDX"]
-    if apr4_mc_check <= MIN_MARKET_CAP_FOR_VALID:
-        return df_s  # DYDX not fixed, use normal smoothing
-    
-    # Load prices and smooth them instead of MC
-    cache_path = CACHE_DIR / "dydx_365d_usd.json"
-    if not cache_path.exists():
-        return df_s
-    
-    try:
-        with open(cache_path, "r", encoding="utf-8") as f:
-            js = json.load(f)
-        
-        if "prices" not in js or not js["prices"]:
-            return df_s
-        
-        df_prices = pd.DataFrame(js["prices"], columns=["ts", "price"])
-        df_prices["date"] = pd.to_datetime(df_prices["ts"], unit="ms").dt.floor("D")
-        df_prices = df_prices.sort_values("ts").groupby("date", as_index=False).last()
-        prices_raw = df_prices.set_index("date")["price"].sort_index()
-        
-        # Align prices with df_for_smoothing index
-        prices_aligned = prices_raw.reindex(df_for_smoothing.index)
-        
-        # Smooth prices
-        prices_df = pd.DataFrame({"price": prices_aligned})
-        prices_smoothed_df = apply_smoothing(prices_df, smoothing)
-        prices_smoothed = prices_smoothed_df["price"]
-        
-        # Calculate last correct Q value before break_date
-        break_date = apr2
-        before_break = df_for_smoothing.index[df_for_smoothing.index < break_date]
-        if len(before_break) > 0 and "DYDX" in df_for_smoothing.columns:
-            last_correct_date = before_break[-1]
-            if last_correct_date in prices_raw.index:
-                last_mc = df_for_smoothing.loc[last_correct_date, "DYDX"]
-                last_price = prices_raw.loc[last_correct_date]
-                if last_price > 0 and last_mc > 0:
-                    q_baseline = last_mc / last_price
-                else:
-                    return df_s  # Can't calculate Q
-            else:
-                return df_s
-        else:
-            return df_s
-        
-        # Recalculate MC = Q_baseline * Price_smoothed for dates >= break_date
-        for dt in df_for_smoothing.index:
-            if dt >= break_date and dt in prices_smoothed.index:
-                price_sm = prices_smoothed.loc[dt]
-                if pd.notna(price_sm) and price_sm > 0:
-                    mc_recalc = q_baseline * price_sm
-                    df_s.loc[dt, "DYDX"] = mc_recalc
-        
-        logger.info("Fixed DYDX smoothing: Used Price smoothing to keep Q constant")
-    except Exception as e:
-        logger.error(f"Error in DYDX smoothing fix: {e}")
-    
-    return df_s
 
 
 def _prepare_plot_data(
@@ -521,42 +615,15 @@ def _prepare_plot_data(
     """
     if view == "Normalized (Linear)":
         df_plot = normalize_start100(df_s)
-        # Force DYDX normalization
-        df_plot = _force_dydx_normalization(df_plot, df_s)
         return df_plot, "Index (100 = first value)", "linear", True
     
     elif view == "Normalized (Log)":
         df_plot = normalize_start100(df_s)
-        df_plot = _force_dydx_normalization(df_plot, df_s)
         return df_plot, "Index (100 = first value, log)", "log", True
     
     else:  # Market Cap (Log)
         df_plot = df_s
         return df_plot, "Market Cap (USD, log)", "log", False
-
-
-def _force_dydx_normalization(df_plot: pd.DataFrame, df_s: pd.DataFrame) -> pd.DataFrame:
-    """Force correct DYDX normalization using Dec 25 baseline."""
-    if "DYDX" not in df_s.columns:
-        return df_plot
-    
-    baseline_date, baseline_mc = find_dydx_baseline_date(df_s["DYDX"])
-    if baseline_date is None or baseline_mc is None:
-        logger.warning("DYDX: Could not find valid baseline date near Dec 25")
-        return df_plot
-    
-    dydx_col = df_s["DYDX"]
-    dydx_normalized = (dydx_col / baseline_mc * 100)
-    dydx_normalized.loc[dydx_normalized.index < baseline_date] = pd.NA
-    dydx_normalized[dydx_col.isna()] = pd.NA
-    df_plot["DYDX"] = dydx_normalized
-    
-    logger.info(
-        f"DYDX: Force normalized using {baseline_date.strftime('%Y-%m-%d')} "
-        f"baseline (MC={baseline_mc:,.0f})"
-    )
-    
-    return df_plot
 
 
 def _get_data_series_for_symbol(
@@ -567,39 +634,8 @@ def _get_data_series_for_symbol(
     view: str,
     normalized_view: bool
 ) -> Optional[pd.Series]:
-    """Get data series for a symbol, with special handling for DYDX."""
-    # For DYDX, always use df_plot
-    if sym == "DYDX":
-        if sym in df_plot.columns:
-            data_series = df_plot[sym]
-            if data_series.dropna().empty:
-                logger.error("DYDX is in df_plot but has no valid data!")
-                return None
-        else:
-            logger.error("DYDX is NOT in df_plot! This should not happen.")
-            if sym in df_s.columns:
-                df_plot[sym] = normalize_start100(df_s[[sym]])[sym]
-                data_series = df_plot[sym]
-                logger.warning("Force-added DYDX to df_plot")
-            else:
-                return None
-        
-        # Final safety: recalculate normalization
-        if sym in df_s.columns and normalized_view:
-            baseline_date, baseline_mc = find_dydx_baseline_date(df_s[sym])
-            if baseline_date is not None and baseline_mc is not None:
-                data_series_fixed = (df_s[sym] / baseline_mc * 100)
-                data_series_fixed.loc[data_series_fixed.index < baseline_date] = pd.NA
-                data_series_fixed[df_s[sym].isna()] = pd.NA
-                data_series = data_series_fixed
-                logger.info(
-                    f"DYDX: Final safety recalculation - "
-                    f"baseline={baseline_mc:,.0f} (date={baseline_date.strftime('%Y-%m-%d')})"
-                )
-        
-        return data_series
-    
-    # For other symbols, try df_plot first
+    """Get data series for a symbol."""
+    # Try df_plot first
     if sym in df_plot.columns:
         data_series = df_plot[sym]
         if not data_series.dropna().empty and not (data_series.dropna() == 0).all():
@@ -632,7 +668,7 @@ def _prepare_valid_data(
     normalized_view: bool,
     view: str
 ) -> Optional[pd.Series]:
-    """Prepare valid data for plotting, with special handling for DYDX."""
+    """Prepare valid data for plotting."""
     # Drop NaN values
     valid_data = data_series.dropna()
     if valid_data.empty:
@@ -646,25 +682,6 @@ def _prepare_valid_data(
     
     if valid_data.empty:
         return None
-    
-    # Final safety for DYDX: recalculate right before plotting
-    if sym == "DYDX" and normalized_view and sym in df_s.columns:
-        baseline_date, baseline_mc = find_dydx_baseline_date(df_s[sym])
-        if baseline_date is not None and baseline_mc is not None:
-            data_series_final = (df_s[sym] / baseline_mc * 100)
-            data_series_final.loc[data_series_final.index < baseline_date] = pd.NA
-            data_series_final[df_s[sym].isna()] = pd.NA
-            
-            valid_data_final = data_series_final.dropna()
-            if len(valid_data_final) > 0:
-                non_zero_final = valid_data_final != 0
-                if non_zero_final.any():
-                    first_non_zero_final = valid_data_final[non_zero_final].index[0]
-                    valid_data = valid_data_final.loc[valid_data_final.index >= first_non_zero_final]
-                    logger.info(
-                        f"DYDX: Final pre-plot recalculation applied "
-                        f"(baseline={baseline_date.strftime('%Y-%m-%d')})"
-                    )
     
     return valid_data
 

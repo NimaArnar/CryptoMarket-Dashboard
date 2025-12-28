@@ -3,7 +3,6 @@ import pandas as pd
 from typing import Dict, List, Optional
 
 from src.constants import DOM_SYM, MIN_MARKET_CAP_FOR_VALID
-from src.data.cleaner import find_dydx_baseline_date
 from src.utils import setup_logger
 
 logger = setup_logger(__name__)
@@ -48,9 +47,6 @@ def normalize_start100(df: pd.DataFrame) -> pd.DataFrame:
     """
     Normalize each column to start at 100, using first meaningful value.
     
-    For DYDX, uses Dec 25, 2024 (or nearby date) as baseline instead of
-    corrupted April 4 data.
-    
     Args:
         df: DataFrame with date index
     
@@ -76,22 +72,6 @@ def normalize_start100(df: pd.DataFrame) -> pd.DataFrame:
         
         first_valid_idx = non_nan_data[non_zero_mask].index[0]
         first_valid_val = col_data.loc[first_valid_idx]
-        
-        # Special handling for DYDX: use Dec 25 (or nearby) as baseline
-        if col == "DYDX":
-            baseline_date, baseline_val = find_dydx_baseline_date(col_data)
-            if baseline_date is not None and baseline_val is not None:
-                first_valid_idx = baseline_date
-                first_valid_val = baseline_val
-                logger.info(
-                    f"DYDX normalization: Using {baseline_date.strftime('%Y-%m-%d')} "
-                    f"as baseline (MC={first_valid_val:,.0f})"
-                )
-            else:
-                logger.warning(
-                    "DYDX normalization: Could not find valid baseline date, "
-                    "using auto-detected first_valid_idx"
-                )
         
         # Normalize using first valid value
         normalized = (col_data / first_valid_val * 100)
