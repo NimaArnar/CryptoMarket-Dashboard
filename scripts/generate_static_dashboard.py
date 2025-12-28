@@ -127,7 +127,7 @@ def generate_html(data_manager: DataManager) -> str:
     fig_btc_eth_json = json.dumps(fig_btc_eth, cls=PlotlyJSONEncoder)
     
     # Generate HTML - Simple page with just the chart
-    html = f"""<!DOCTYPE html>
+    html = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -135,19 +135,19 @@ def generate_html(data_manager: DataManager) -> str:
     <title>BTC vs ETH - Normalized Market Cap</title>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <style>
-        body {{
+        body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             max-width: 1400px;
             margin: 0 auto;
             padding: 20px;
             background-color: #f8f9fa;
-        }}
-        .chart-container {{
+        }
+        .chart-container {
             background-color: white;
             padding: 30px;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }}
+        }
     </style>
 </head>
 <body>
@@ -157,7 +157,7 @@ def generate_html(data_manager: DataManager) -> str:
     
     <script>
         var figureBtcEth = """ + fig_btc_eth_json + """;
-        Plotly.newPlot('chart-btc-eth', figureBtcEth.data, figureBtcEth.layout, {{responsive: true}});
+        Plotly.newPlot('chart-btc-eth', figureBtcEth.data, figureBtcEth.layout, {responsive: true});
     </script>
 </body>
 </html>
