@@ -1,26 +1,6 @@
 # Deployment Guide
 
-## Option 0: Static HTML Dashboard on GitHub Pages (Auto-Updates Daily) ⭐
-
-**Yes! You can create a static HTML version that updates automatically!**
-
-I've set up a GitHub Actions workflow that:
-- Runs daily (or on code changes)
-- Generates a static HTML dashboard with the latest data
-- Deploys it to GitHub Pages automatically
-
-**To enable:**
-1. Go to your repo Settings → Pages
-2. Source: Deploy from a branch → Branch: `main` → Folder: `/docs`
-3. Save
-4. The workflow will run and generate `docs/index.html` automatically
-5. Your dashboard will be at: `https://NimaArnar.github.io/CryptoMarket-Dashboard/`
-
-**Note:** This is a static snapshot (not fully interactive), but it shows the latest charts and data, updated daily!
-
----
-
-## Option 1: Full Interactive Dashboard (Python Hosting)
+## Full Interactive Dashboard (Python Hosting)
 
 This Dash application cannot run on GitHub Pages (which only hosts static sites). Use one of these platforms that support Python:
 
@@ -60,7 +40,7 @@ Your app will be available at: `https://crypto-market-dashboard.onrender.com`
    git push heroku main
    ```
 
-## Option 4: Use GitHub Pages for Documentation
+## Option 3: Use GitHub Pages for Documentation
 
 While you can't host the Dash app on GitHub Pages, you can:
 

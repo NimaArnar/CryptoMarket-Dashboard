@@ -7,11 +7,13 @@ An interactive web dashboard for visualizing cryptocurrency market cap data usin
 - 📊 **Interactive Charts**: View market cap trends with multiple smoothing options (7D SMA, 14D EMA, 30D SMA)
 - 📈 **Normalized Views**: Compare coins using normalized indices (linear and log scale)
 - 🔍 **Correlation Analysis**: Scatter plots showing returns correlation between pairs of coins
+- 📋 **Latest Data Table**: View latest price, Q supply, and market cap for all coins in a sortable, filterable table
 - 🎯 **Smart Data Cleaning**: Automatic detection and correction of corrupted circulating supply data
 - ⚡ **Fast Data Loading**: Async parallel fetching for faster startup times
 - 💾 **Caching**: 24-hour cache to minimize API calls
 - 📁 **Excel Export**: Export market cap data to Excel files
-- 🎨 **Modern UI**: Clean, intuitive interface with improved button styling and larger charts
+- 🎨 **Modern UI**: Clean, intuitive interface with tabbed navigation, improved button styling and larger charts
+- ✅ **Bulk Selection**: Select All/Unselect All buttons for quick coin selection
 
 ## Installation
 
@@ -131,7 +133,16 @@ The dashboard automatically detects and fixes corrupted circulating supply data 
 3. Using the **last correct Q value** before corruption as the baseline
 4. Recomputing market cap as: `MC_fixed = Q_baseline × Price` from the break date onward
 
-This ensures market cap accurately reflects price movements even when API supply data is corrupted (e.g., DYDX on April 2-4, 2025).
+This ensures market cap accurately reflects price movements even when API supply data is corrupted.
+
+### Tabs
+
+- **Charts Tab**: Interactive charts with full controls (Smoothing, View, Correlation, Selection)
+- **Latest Data Tab**: Table showing latest Price, Q Supply, and Market Cap for all coins
+  - Sortable columns (numeric sorting)
+  - Filterable/searchable
+  - Pagination (20 rows per page)
+  - Controls panel automatically hidden on this tab
 
 ### Views
 
@@ -145,6 +156,12 @@ This ensures market cap accurately reflects price movements even when API supply
 - **7D SMA**: 7-day simple moving average
 - **14D EMA**: 14-day exponential moving average
 - **30D SMA**: 30-day simple moving average
+
+### Selection Controls
+
+- **Select All**: Select all coins available in the current view
+- **Unselect All**: Deselect all coins
+- **Legend Toggle**: Click on legend items to toggle individual coins on/off
 
 ## Logging
 
@@ -174,17 +191,30 @@ If you hit rate limits:
 
 ## Recent Updates
 
-### UI Improvements (Latest)
+### Latest Features (v2.0)
+- **Tabbed Interface**: Added Charts and Latest Data tabs for better organization
+- **Latest Data Table**: New tab showing Price, Q Supply, and Market Cap for all coins with sorting and filtering
+- **Bulk Selection**: Added Select All/Unselect All buttons for quick coin selection
+- **Smart Controls**: Controls panel automatically hides on Latest Data tab
+- **Improved Table Sorting**: Fixed numeric sorting in data table (works correctly with formatted values)
+
+### Removed Coins
+- **DYDX**: Removed due to corrupted API data
+- **IMX**: Removed due to corrupted API data
+- Total coins: 25 (down from 27)
+
+### UI Improvements
 - **Modern Button Design**: Clean, modern button styling with better spacing and visual hierarchy
-- **Larger Charts**: Increased chart height from 62vh to 75vh for better data visibility
+- **Larger Charts**: Increased chart height to 75vh for better data visibility
 - **Improved Layout**: Better color scheme, spacing, and overall visual design
 - **Simplified Controls**: Streamlined control panel with organized sections
 - **Better Error Handling**: Improved logging and error messages for debugging
 
 ### Bug Fixes
-- Fixed coin count display when switching between views (correctly shows 27 coins for Market Cap view, 28 for normalized views)
+- Fixed coin count display when switching between views
 - Fixed chart rendering issues on initial page load
 - Improved selected coin filtering to match current view/order
+- Fixed table sorting to work with numeric values instead of formatted strings
 
 ## Performance
 
