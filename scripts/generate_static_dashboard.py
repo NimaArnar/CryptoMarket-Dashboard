@@ -85,7 +85,6 @@ def generate_html(data_manager: DataManager) -> str:
             valid_data = valid_data.loc[valid_data.index >= first_non_zero_idx]
         
         if valid_data.empty:
-            logger.warning(f"{coin}: Series is empty after removing zeros")
             continue
         
         # Ensure first value is exactly 100 (fix any floating point issues)
