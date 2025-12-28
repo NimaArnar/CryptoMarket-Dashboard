@@ -299,9 +299,7 @@ def _render_chart_internal(
                     line=dict(color=color_for(sym), width=2, dash="dot"),
                     visible=True if sym in selected_set else "legendonly",
                     hovertemplate=(
-                        f"<b>{DOM_SYM}</b> — {DOM_CAT}<br>"
-                        f"Smoothing: {smoothing}<br>"
-                        f"View: {view}<br>"
+                        f"<b>{DOM_SYM}</b><br>"
                         "Date: %{x}<br>"
                         "Index: %{y:.2f}<extra></extra>"
                     ),
@@ -333,25 +331,19 @@ def _render_chart_internal(
         if price_data is not None and not price_data.empty:
             customdata_list = price_data.values
         
-        # Build hovertemplate
+        # Build hovertemplate - simplified: only name, date, index/price
         if normalized_view:
-            # For normalized views, show both index and price
+            # For normalized views, show index and price
             if customdata_list is not None:
                 hovertemplate = (
-                    f"<b>{sym}</b> — {cat}<br>"
-                    f"Group: {grp}<br>"
-                    f"Smoothing: {smoothing}<br>"
-                    f"View: {view}<br>"
+                    f"<b>{sym}</b><br>"
                     "Date: %{x}<br>"
                     "Index: %{y:.2f}<br>"
                     "Price: $%{customdata:,.2f}<extra></extra>"
                 )
             else:
                 hovertemplate = (
-                    f"<b>{sym}</b> — {cat}<br>"
-                    f"Group: {grp}<br>"
-                    f"Smoothing: {smoothing}<br>"
-                    f"View: {view}<br>"
+                    f"<b>{sym}</b><br>"
                     "Date: %{x}<br>"
                     "Index: %{y:.2f}<extra></extra>"
                 )
@@ -359,20 +351,14 @@ def _render_chart_internal(
             # For market cap view, show market cap and price
             if customdata_list is not None:
                 hovertemplate = (
-                    f"<b>{sym}</b> — {cat}<br>"
-                    f"Group: {grp}<br>"
-                    f"Smoothing: {smoothing}<br>"
-                    f"View: {view}<br>"
+                    f"<b>{sym}</b><br>"
                     "Date: %{x}<br>"
                     "Market Cap: %{y:.3s} USD<br>"
                     "Price: $%{customdata:,.2f}<extra></extra>"
                 )
             else:
                 hovertemplate = (
-                    f"<b>{sym}</b> — {cat}<br>"
-                    f"Group: {grp}<br>"
-                    f"Smoothing: {smoothing}<br>"
-                    f"View: {view}<br>"
+                    f"<b>{sym}</b><br>"
                     "Date: %{x}<br>"
                     "Market Cap: %{y:.3s} USD<extra></extra>"
                 )
