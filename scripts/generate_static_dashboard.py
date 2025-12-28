@@ -52,40 +52,88 @@ def generate_html(data_manager: DataManager) -> str:
     """Generate HTML content with embedded charts."""
     df_raw = data_manager.df_raw
     
-    # Create a simple normalized view chart
+    # Create normalized view chart
     from src.data.transformer import normalize_start100, apply_smoothing
+    from src.visualization import series_for_symbol
     
     df_smoothed = apply_smoothing(df_raw, "7D SMA")
     df_normalized = normalize_start100(df_smoothed)
     
-    # Create chart for top 10 coins by market cap
-    top_coins = df_raw.iloc[-1].nlargest(10).index.tolist()
+    # Chart 1: BTC and ETH normalized view
+    fig_btc_eth = go.Figure()
     
-    fig = go.Figure()
-    
-    for coin in top_coins:
+    for coin in ["BTC", "ETH"]:
         if coin in df_normalized.columns:
             series = df_normalized[coin].dropna()
             if not series.empty:
-                fig.add_trace(go.Scatter(
+                fig_btc_eth.add_trace(go.Scatter(
                     x=series.index,
                     y=series.values,
                     mode="lines",
                     name=coin,
-                    line=dict(width=2)
+                    line=dict(width=3)
                 ))
     
-    fig.update_layout(
-        title="Crypto Market Cap Dashboard - Top 10 Coins (Normalized to 100)",
+    fig_btc_eth.update_layout(
+        title="BTC vs ETH - Normalized Market Cap (100 = first value)",
         xaxis_title="Date",
         yaxis_title="Index (100 = first value)",
         hovermode="closest",
-        height=600,
-        template="plotly_white"
+        height=500,
+        template="plotly_white",
+        legend=dict(x=0.02, y=0.98)
     )
     
-    # Convert figure to JSON
-    fig_json = json.dumps(fig, cls=PlotlyJSONEncoder)
+    # Chart 2: Correlation scatter plot (BTC vs ETH returns)
+    fig_corr = None
+    corr_value = None
+    beta_value = None
+    
+    if "BTC" in df_smoothed.columns and "ETH" in df_smoothed.columns:
+        s_btc = series_for_symbol("BTC", df_smoothed, "Normalized (Linear)")
+        s_eth = series_for_symbol("ETH", df_smoothed, "Normalized (Linear)")
+        
+        if s_btc is not None and s_eth is not None:
+            # Align by date
+            df_aligned = pd.concat([s_btc.rename("BTC"), s_eth.rename("ETH")], axis=1, join="inner").dropna()
+            
+            if df_aligned.shape[0] >= 10:
+                # Calculate returns
+                rets = df_aligned.pct_change().dropna()
+                
+                if not rets.empty and len(rets) > 0:
+                    # Calculate correlation
+                    corr_value = rets["BTC"].corr(rets["ETH"])
+                    
+                    # Calculate beta
+                    if rets["BTC"].var() > 0:
+                        beta_value = rets["ETH"].cov(rets["BTC"]) / rets["BTC"].var()
+                    
+                    # Create scatter plot
+                    fig_corr = go.Figure()
+                    fig_corr.add_trace(go.Scatter(
+                        x=rets["BTC"] * 100,  # Convert to percentage
+                        y=rets["ETH"] * 100,  # Convert to percentage
+                        mode="markers",
+                        name="Daily Returns",
+                        marker=dict(size=6, opacity=0.6, color="rgba(31, 119, 180, 0.6)")
+                    ))
+                    
+                    corr_percent = corr_value * 100 if corr_value else 0
+                    fig_corr.update_layout(
+                        title=f"BTC vs ETH Correlation - Returns Scatter (corr={corr_percent:.1f}%)",
+                        xaxis_title="BTC Daily Return (%)",
+                        yaxis_title="ETH Daily Return (%)",
+                        xaxis=dict(tickformat=".1%"),
+                        yaxis=dict(tickformat=".1%"),
+                        height=500,
+                        template="plotly_white",
+                        hovermode="closest"
+                    )
+    
+    # Convert figures to JSON
+    fig_btc_eth_json = json.dumps(fig_btc_eth, cls=PlotlyJSONEncoder)
+    fig_corr_json = json.dumps(fig_corr, cls=PlotlyJSONEncoder) if fig_corr else None
     
     # Get latest market cap data
     latest_data = df_raw.iloc[-1].to_dict()
@@ -177,9 +225,27 @@ def generate_html(data_manager: DataManager) -> str:
     </div>
     
     <div class="chart-container">
-        <div id="chart"></div>
+        <h2 style="margin-top: 0;">BTC vs ETH - Market Cap Comparison</h2>
+        <div id="chart-btc-eth"></div>
     </div>
+"""
     
+    # Add correlation chart if available
+    if fig_corr_json:
+        corr_display = f"{corr_value*100:.1f}%" if corr_value else "N/A"
+        beta_display = f"{beta_value:.2f}" if beta_value else "N/A"
+        html += f"""
+    <div class="chart-container">
+        <h2 style="margin-top: 0;">BTC vs ETH - Correlation Analysis</h2>
+        <p style="margin-bottom: 15px; color: #495057;">
+            <strong>Correlation:</strong> {corr_display} | 
+            <strong>Beta:</strong> {beta_display}
+        </p>
+        <div id="chart-corr"></div>
+    </div>
+"""
+    
+    html += """
     <div class="data-table">
         <h2>Latest Market Cap Data</h2>
         <table>
@@ -208,9 +274,17 @@ def generate_html(data_manager: DataManager) -> str:
     </div>
     
     <script>
-        var figure = """ + fig_json + """;
-        Plotly.newPlot('chart', figure.data, figure.layout, {{responsive: true}});
-    </script>
+        var figureBtcEth = """ + fig_btc_eth_json + """;
+        Plotly.newPlot('chart-btc-eth', figureBtcEth.data, figureBtcEth.layout, {responsive: true});
+"""
+    
+    if fig_corr_json:
+        html += """
+        var figureCorr = """ + fig_corr_json + """;
+        Plotly.newPlot('chart-corr', figureCorr.data, figureCorr.layout, {responsive: true});
+"""
+    
+    html += """    </script>
 </body>
 </html>
 """
