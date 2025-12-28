@@ -102,8 +102,8 @@ def create_returns_scatter(
             name=f"{symbol_a} vs {symbol_b}",
             marker=dict(size=6, opacity=0.6),
             hovertemplate=(
-                f"<b>{symbol_a} return</b>: %{{x:.4f}}<br>"
-                f"<b>{symbol_b} return</b>: %{{y:.4f}}<extra></extra>"
+                f"<b>{symbol_a} return</b>: %{{x:.2%}}<br>"
+                f"<b>{symbol_b} return</b>: %{{y:.2%}}<extra></extra>"
             )
         )
     )
@@ -112,8 +112,10 @@ def create_returns_scatter(
     corr_percent = corr * 100
     fig.update_layout(
         title=f"Returns scatter — {symbol_a} vs {symbol_b} | {corr_label}={corr_percent:.1f}%",
-        xaxis_title=f"{symbol_a} daily return",
-        yaxis_title=f"{symbol_b} daily return",
+        xaxis_title=f"{symbol_a} daily return (%)",
+        yaxis_title=f"{symbol_b} daily return (%)",
+        xaxis=dict(tickformat=".1%"),
+        yaxis=dict(tickformat=".1%"),
         margin=dict(t=40, r=30, l=60, b=50),
     )
     
