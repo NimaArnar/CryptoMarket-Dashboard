@@ -9,6 +9,9 @@ lxml>=5.3.0      # For robust HTML parsing when scraping tables
 # Optional: For async parallel fetching (faster data loading)
 aiohttp>=3.9.0
 
+# For static dashboard generation
+kaleido>=0.2.1  # For static image export (optional, for GitHub Actions)
+
 # Development dependencies (for testing)
 # pytest>=7.4.0
 # pytest-asyncio>=0.21.0

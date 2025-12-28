@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: crypto-market-dashboard
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: PORT
+        value: 8052
+      - key: USE_ASYNC_FETCH
+        value: true
+      - key: MAX_CONCURRENT_REQUESTS
+        value: 5
+

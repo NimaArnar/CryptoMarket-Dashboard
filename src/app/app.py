@@ -1,4 +1,5 @@
 """Main Dash application setup."""
+import os
 from dash import Dash
 
 from src.app import callbacks, layout
@@ -45,8 +46,9 @@ def create_app(data_manager: DataManager) -> Dash:
 
 def run_app(app: Dash) -> None:
     """Run the Dash application."""
-    startup_msg = f"Starting Dash… open http://127.0.0.1:{DASH_PORT}/"
+    host = "0.0.0.0" if os.getenv("PORT") else "127.0.0.1"  # Use 0.0.0.0 for cloud deployment
+    startup_msg = f"Starting Dash… open http://{host}:{DASH_PORT}/"
     logger.info(startup_msg)
     # Log file path is set in utils.setup_logger
-    app.run(debug=DASH_DEBUG, port=DASH_PORT)
+    app.run(debug=DASH_DEBUG, host=host, port=DASH_PORT)
 

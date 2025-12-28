@@ -41,6 +41,6 @@ USE_ASYNC = os.getenv("USE_ASYNC_FETCH", "true").lower() == "true"
 MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT_REQUESTS", "5"))
 
 # Dash App Configuration
-DASH_PORT = 8052
-DASH_DEBUG = True
+DASH_PORT = int(os.getenv("PORT", "8052"))  # Use PORT env var for cloud deployment
+DASH_DEBUG = os.getenv("DASH_DEBUG", "False").lower() == "true"  # Disable debug in production
 
