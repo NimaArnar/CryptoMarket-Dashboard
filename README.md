@@ -39,7 +39,15 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Basic Usage (Free API)
+### Quick Start: Web Version (GitHub Pages)
+
+A simplified interactive web version is available on GitHub Pages:
+- **Live Demo**: [https://nimaarnar.github.io/CryptoMarket-Dashboard/](https://nimaarnar.github.io/CryptoMarket-Dashboard/)
+- **Features**: BTC/ETH charts, market cap table, smoothing, views, and correlation analysis
+- **No Installation Required**: Runs entirely in your browser using JavaScript
+- **Note**: This is a sample version focusing on BTC and ETH. The full Python application supports 25+ coins with advanced features.
+
+### Basic Usage (Free API) - Full Python Application
 
 ```bash
 python main.py
@@ -213,7 +221,15 @@ If you hit rate limits:
 
 ## Recent Updates
 
-### Latest Features (v2.2)
+### Latest Features (v2.3)
+- **GitHub Pages Deployment**: Added interactive web version deployed on GitHub Pages
+  - Simplified JavaScript version focusing on BTC and ETH
+  - All core features: smoothing, views, correlation analysis
+  - Client-side caching for faster loads
+  - No installation required - runs in browser
+  - Available at: [https://nimaarnar.github.io/CryptoMarket-Dashboard/](https://nimaarnar.github.io/CryptoMarket-Dashboard/)
+
+### Previous Features (v2.2)
 - **Split Correlation Analysis**: New feature that calculates separate correlation and beta for positive vs negative return days
   - When 2 coins are selected, shows overall correlation plus correlation for days when the first coin was positive vs negative
   - Scatter plot uses green markers for positive days and red markers for negative days
