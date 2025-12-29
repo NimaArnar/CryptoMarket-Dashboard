@@ -766,21 +766,21 @@
             }
             
             // Update correlation info
-            const impliedMove = beta * 10; // beta is already a ratio, so * 10 gives percentage
+            const impliedMove = beta * 10; // beta * 10 gives percentage (e.g., 1.47 * 10 = 14.7%)
             let infoText = `Correlation (daily returns) — ${coinA} vs ${coinB} | `;
             infoText += `Overall: corr=${(correlation * 100).toFixed(1)}%, beta=${beta.toFixed(2)} `;
-            infoText += `(if ${coinA} +10%, ${coinB} ≈ ${impliedMove >= 0 ? '+' : ''}${(impliedMove * 100).toFixed(1)}%)`;
+            infoText += `(if ${coinA} +10%, ${coinB} ≈ ${impliedMove >= 0 ? '+' : ''}${impliedMove.toFixed(1)}%)`;
             
             if (corrPositive !== null && betaPositive !== null) {
                 const impliedPos = betaPositive * 10;
                 infoText += ` | 📈 ${coinA} positive days (${positiveDays.length} days): corr=${(corrPositive * 100).toFixed(1)}%, `;
-                infoText += `beta=${betaPositive.toFixed(2)} (if ${coinA} +10%, ${coinB} ≈ ${impliedPos >= 0 ? '+' : ''}${(impliedPos * 100).toFixed(1)}%)`;
+                infoText += `beta=${betaPositive.toFixed(2)} (if ${coinA} +10%, ${coinB} ≈ ${impliedPos >= 0 ? '+' : ''}${impliedPos.toFixed(1)}%)`;
             }
             
             if (corrNegative !== null && betaNegative !== null) {
                 const impliedNeg = betaNegative * -10; // Negative because coin A goes down
                 infoText += ` | 📉 ${coinA} negative days (${negativeDays.length} days): corr=${(corrNegative * 100).toFixed(1)}%, `;
-                infoText += `beta=${betaNegative.toFixed(2)} (if ${coinA} -10%, ${coinB} ≈ ${impliedNeg >= 0 ? '+' : ''}${(impliedNeg * 100).toFixed(1)}%)`;
+                infoText += `beta=${betaNegative.toFixed(2)} (if ${coinA} -10%, ${coinB} ≈ ${impliedNeg >= 0 ? '+' : ''}${impliedNeg.toFixed(1)}%)`;
             }
             
             document.getElementById('correlationInfo').innerHTML = infoText;
