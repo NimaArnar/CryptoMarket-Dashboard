@@ -194,9 +194,13 @@
                 
                 const priceData = await response.json();
                 
-                // Fetch historical data for BTC and ETH
-                const btcHistory = await fetchHistory('bitcoin');
-                const ethHistory = await fetchHistory('ethereum');
+                // Fetch historical data for BTC and ETH (in parallel)
+                console.log('Fetching historical data...');
+                const [btcHistory, ethHistory] = await Promise.all([
+                    fetchHistory('bitcoin'),
+                    fetchHistory('ethereum')
+                ]);
+                console.log('Historical data fetched:', { btcHistory, ethHistory });
                 
                 // Process market cap data
                 marketCapData = COINS.map(coin => {
@@ -244,22 +248,36 @@
 
         async function fetchHistory(coinId) {
             try {
-                const response = await fetch(
-                    `${COINGECKO_API}/coins/${coinId}/market_chart?vs_currency=usd&days=365&interval=daily`
-                );
+                console.log(`Fetching history for ${coinId}...`);
+                const url = `${COINGECKO_API}/coins/${coinId}/market_chart?vs_currency=usd&days=365&interval=daily`;
+                console.log(`URL: ${url}`);
+                
+                const response = await fetch(url);
+                console.log(`Response status: ${response.status}`);
+                
                 if (!response.ok) {
-                    throw new Error(`Failed to fetch history for ${coinId}`);
+                    const errorText = await response.text();
+                    console.error(`API error for ${coinId}:`, response.status, errorText);
+                    throw new Error(`Failed to fetch history for ${coinId}: ${response.status}`);
                 }
+                
                 const data = await response.json();
+                console.log(`Data received for ${coinId}:`, Object.keys(data));
                 
                 // Process market cap data
                 const marketCaps = data.market_cap || [];
-                if (marketCaps.length === 0) return null;
+                console.log(`Market caps array length: ${marketCaps.length}`);
+                
+                if (marketCaps.length === 0) {
+                    console.warn(`No market cap data for ${coinId}`);
+                    return null;
+                }
                 
                 // Convert to date-value pairs and normalize to start at 100
                 const dates = [];
                 const values = [];
                 const firstValue = marketCaps[0][1];
+                console.log(`First market cap value: ${firstValue}`);
                 
                 marketCaps.forEach(([timestamp, value]) => {
                     if (value > 0 && firstValue > 0) {
@@ -268,6 +286,7 @@
                     }
                 });
                 
+                console.log(`Processed ${dates.length} data points for ${coinId}`);
                 return { dates, values };
             } catch (error) {
                 console.error(`Error fetching history for ${coinId}:`, error);
@@ -354,9 +373,14 @@
         }
 
         function renderCharts(btcHistory, ethHistory) {
+            console.log('Rendering charts...');
+            console.log('BTC History:', btcHistory);
+            console.log('ETH History:', ethHistory);
+            
             const traces = [];
             
-            if (btcHistory) {
+            if (btcHistory && btcHistory.dates && btcHistory.dates.length > 0) {
+                console.log(`Adding BTC trace with ${btcHistory.dates.length} points`);
                 traces.push({
                     x: btcHistory.dates,
                     y: btcHistory.values,
@@ -364,9 +388,12 @@
                     name: 'BTC',
                     line: { width: 3, color: '#f7931a' }
                 });
+            } else {
+                console.warn('BTC history is missing or empty');
             }
             
-            if (ethHistory) {
+            if (ethHistory && ethHistory.dates && ethHistory.dates.length > 0) {
+                console.log(`Adding ETH trace with ${ethHistory.dates.length} points`);
                 traces.push({
                     x: ethHistory.dates,
                     y: ethHistory.values,
@@ -374,6 +401,15 @@
                     name: 'ETH',
                     line: { width: 3, color: '#627eea' }
                 });
+            } else {
+                console.warn('ETH history is missing or empty');
+            }
+            
+            if (traces.length === 0) {
+                console.error('No traces to plot!');
+                document.getElementById('chart-btc-eth').innerHTML = 
+                    '<p style="text-align: center; padding: 40px; color: #666;">Unable to load chart data. Please check browser console for errors.</p>';
+                return;
             }
             
             const layout = {
@@ -386,6 +422,7 @@
                 legend: { x: 0.02, y: 0.98 }
             };
             
+            console.log('Plotting with', traces.length, 'traces');
             Plotly.newPlot('chart-btc-eth', traces, layout, { responsive: true });
         }
 
