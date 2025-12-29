@@ -78,13 +78,13 @@ def series_for_symbol(
 
 
 def create_returns_scatter(
-    rets: pd.DataFrame, symbol_a: str, symbol_b: str, corr: float, corr_type: str = "returns"
+    data: pd.DataFrame, symbol_a: str, symbol_b: str, corr: float, corr_type: str = "returns"
 ) -> go.Figure:
     """
-    Create a scatter plot of returns with correlation in title.
+    Create a scatter plot of returns or indexed levels with correlation in title.
     
     Args:
-        rets: DataFrame with returns data
+        data: DataFrame with returns data (for corr_type="returns") or indexed levels (for corr_type="levels")
         symbol_a: First symbol
         symbol_b: Second symbol
         corr: Correlation value
@@ -94,28 +94,56 @@ def create_returns_scatter(
         Plotly Figure with scatter plot
     """
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=rets[symbol_a],
-            y=rets[symbol_b],
-            mode="markers",
-            name=f"{symbol_a} vs {symbol_b}",
-            marker=dict(size=6, opacity=0.6),
-            hovertemplate=(
-                f"<b>{symbol_a} return</b>: %{{x:.2%}}<br>"
-                f"<b>{symbol_b} return</b>: %{{y:.2%}}<extra></extra>"
+    
+    if corr_type == "returns":
+        # Returns mode: show daily returns
+        fig.add_trace(
+            go.Scatter(
+                x=data[symbol_a],
+                y=data[symbol_b],
+                mode="markers",
+                name=f"{symbol_a} vs {symbol_b}",
+                marker=dict(size=6, opacity=0.6),
+                hovertemplate=(
+                    f"<b>{symbol_a} return</b>: %{{x:.2%}}<br>"
+                    f"<b>{symbol_b} return</b>: %{{y:.2%}}<extra></extra>"
+                )
             )
         )
-    )
+        corr_label = "corr"
+        title_text = f"Returns scatter — {symbol_a} vs {symbol_b} | {corr_label}={corr*100:.1f}%"
+        xaxis_title = f"{symbol_a} daily return (%)"
+        yaxis_title = f"{symbol_b} daily return (%)"
+        xaxis_format = ".1%"
+        yaxis_format = ".1%"
+    else:
+        # Levels mode: show indexed levels
+        fig.add_trace(
+            go.Scatter(
+                x=data[symbol_a],
+                y=data[symbol_b],
+                mode="markers",
+                name=f"{symbol_a} vs {symbol_b}",
+                marker=dict(size=6, opacity=0.6),
+                hovertemplate=(
+                    f"<b>{symbol_a} index</b>: %{{x:.1f}}<br>"
+                    f"<b>{symbol_b} index</b>: %{{y:.1f}}<extra></extra>"
+                )
+            )
+        )
+        corr_label = "levels corr"
+        title_text = f"Levels scatter — {symbol_a} vs {symbol_b} | {corr_label}={corr*100:.1f}%"
+        xaxis_title = f"{symbol_a} indexed level (100 = start)"
+        yaxis_title = f"{symbol_b} indexed level (100 = start)"
+        xaxis_format = ".1f"
+        yaxis_format = ".1f"
     
-    corr_label = "corr" if corr_type == "returns" else "levels corr"
-    corr_percent = corr * 100
     fig.update_layout(
-        title=f"Returns scatter — {symbol_a} vs {symbol_b} | {corr_label}={corr_percent:.1f}%",
-        xaxis_title=f"{symbol_a} daily return (%)",
-        yaxis_title=f"{symbol_b} daily return (%)",
-        xaxis=dict(tickformat=".1%"),
-        yaxis=dict(tickformat=".1%"),
+        title=title_text,
+        xaxis_title=xaxis_title,
+        yaxis_title=yaxis_title,
+        xaxis=dict(tickformat=xaxis_format),
+        yaxis=dict(tickformat=yaxis_format),
         margin=dict(t=40, r=30, l=60, b=50),
     )
     

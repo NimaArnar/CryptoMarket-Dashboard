@@ -52,36 +52,56 @@ def create_layout(coin_status: dict, default_selected: list) -> html.Div:
                 id="main-tabs",
                 value="chart-tab",
                 style={
-                    "marginTop": "20px",
-                    "borderBottom": "1px solid #dee2e6"
+                    "marginTop": "20px"
                 },
                 children=[
                     dcc.Tab(
                         label="Charts",
                         value="chart-tab",
                         style={
-                            "padding": "12px 24px",
+                            "padding": "8px 16px",
                             "fontWeight": "500",
-                            "fontSize": "15px"
+                            "fontSize": "13px",
+                            "borderRadius": "8px 8px 0 0",
+                            "backgroundColor": "#f8f9fa",
+                            "color": "#495057",
+                            "border": "1px solid #dee2e6",
+                            "borderBottom": "none",
+                            "marginRight": "4px"
                         },
                         selected_style={
                             "backgroundColor": "#007bff",
                             "color": "#ffffff",
-                            "borderTop": "2px solid #007bff"
+                            "borderRadius": "8px 8px 0 0",
+                            "border": "1px solid #007bff",
+                            "borderBottom": "none",
+                            "padding": "8px 16px",
+                            "fontWeight": "500",
+                            "fontSize": "13px"
                         }
                     ),
                     dcc.Tab(
                         label="Latest Data",
                         value="data-tab",
                         style={
-                            "padding": "12px 24px",
+                            "padding": "8px 16px",
                             "fontWeight": "500",
-                            "fontSize": "15px"
+                            "fontSize": "13px",
+                            "borderRadius": "8px 8px 0 0",
+                            "backgroundColor": "#f8f9fa",
+                            "color": "#495057",
+                            "border": "1px solid #dee2e6",
+                            "borderBottom": "none"
                         },
                         selected_style={
                             "backgroundColor": "#007bff",
                             "color": "#ffffff",
-                            "borderTop": "2px solid #007bff"
+                            "borderRadius": "8px 8px 0 0",
+                            "border": "1px solid #007bff",
+                            "borderBottom": "none",
+                            "padding": "8px 16px",
+                            "fontWeight": "500",
+                            "fontSize": "13px"
                         }
                     )
                 ]
@@ -272,7 +292,6 @@ def _create_controls_div() -> html.Div:
                         children=[
                             html.Button("Off", id="btn-corr-off", style=button_style),
                             html.Button("Returns", id="btn-corr-ret", style=button_style),
-                            html.Button("Levels", id="btn-corr-lvl", style=button_style),
                         ]
                     ),
                     html.Div(

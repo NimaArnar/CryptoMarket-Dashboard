@@ -64,7 +64,6 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         Input("btn-view-mc-log", "n_clicks"),
         Input("btn-corr-off", "n_clicks"),
         Input("btn-corr-ret", "n_clicks"),
-        Input("btn-corr-lvl", "n_clicks"),
         Input("btn-select-all", "n_clicks"),
         Input("btn-unselect-all", "n_clicks"),
         Input("chart", "restyleData"),
@@ -76,7 +75,7 @@ def register_callbacks(app, data_manager: DataManager) -> None:
     def update_state_and_selected(
         n_s0, n_s7, n_s14, n_s30,
         n_v_lin, n_v_log, n_v_mc,
-        n_c_off, n_c_ret, n_c_lvl,
+        n_c_off, n_c_ret,
         n_select_all, n_unselect_all,
         restyle,
         state, selected, order
@@ -84,7 +83,9 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         """Update state and selection based on button clicks and legend interactions."""
         trig = ctx.triggered_id
         new_state = dict(state or {})
-        selected_set = set(selected or [])
+        # Preserve selection order by using a list, not a set
+        selected_list = list(selected or [])
+        selected_set = set(selected_list)  # For efficient membership testing
         
         # Group buttons removed from UI but functionality preserved (defaults to "all")
         # Group state is maintained but not changeable via UI
@@ -112,15 +113,14 @@ def register_callbacks(app, data_manager: DataManager) -> None:
             new_state["corr_mode"] = "off"
         elif trig == "btn-corr-ret":
             new_state["corr_mode"] = "returns"
-        elif trig == "btn-corr-lvl":
-            new_state["corr_mode"] = "levels"
         
         # Selection buttons
         elif trig == "btn-select-all":
             # Select all will be handled after order calculation
             pass
         elif trig == "btn-unselect-all":
-            # Unselect all will be handled after order calculation
+            # Clear selection
+            selected_list = []
             selected_set = set()
         
         # Legend click persistence
@@ -140,9 +140,15 @@ def register_callbacks(app, data_manager: DataManager) -> None:
                         sym = order[t_idx]
                         v = vis[k]
                         if v is True:
-                            selected_set.add(sym)
+                            # Add to end of list to preserve selection order
+                            if sym not in selected_set:
+                                selected_list.append(sym)
+                                selected_set.add(sym)
                         elif v in (False, "legendonly"):
-                            selected_set.discard(sym)
+                            # Remove from list while preserving order
+                            if sym in selected_set:
+                                selected_list.remove(sym)
+                                selected_set.remove(sym)
         
         # CRITICAL: Recalculate order based on new_state to ensure selected coins
         # are filtered correctly when view/group changes
@@ -154,24 +160,21 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         # Handle select all / unselect all
         if trig == "btn-select-all":
             # Select all coins in current order
-            selected_set = set(current_order) if current_order else set()
+            selected_list = list(current_order) if current_order else []
+            selected_set = set(selected_list)
         elif trig == "btn-unselect-all":
-            # Already set to empty set above
+            # Already cleared above
             pass
         
-        # Restrict selected to current order (use recalculated order, not old one)
+        # Restrict selected to current order (preserve order from selected_list)
         if current_order:
             allowed = set(current_order)
-            selected_set = {s for s in selected_set if s in allowed}
+            # Filter while preserving order
+            selected_list = [s for s in selected_list if s in allowed]
+            selected_set = set(selected_list)
         
-        def sort_key(s):
-            try:
-                return (current_order.index(s) if current_order and s in current_order else 10**9, s)
-            except ValueError:
-                return (10**9, s)
-        
-        ordered_selected = sorted(selected_set, key=sort_key)
-        return new_state, ordered_selected
+        # Return selected_list which preserves selection order (not sorted by chart order)
+        return new_state, selected_list
     
     @app.callback(
         Output("tab-content", "children"),
@@ -224,18 +227,96 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         """Calculate correlation and render scatter plot."""
         corr_text, scatter_fig = _corr_and_scatter_internal(state, selected_syms, order, df_raw)
         
-        # Check if exactly 2 coins are selected
+        # Check if correlation is off
+        corr_mode = "off"
+        if state:
+            corr_mode = state.get("corr_mode", "off")
+        
+        # Check if exactly 2 coins are selected AND correlation is not off
         allowed = set(order or [])
         sel = [s for s in (selected_syms or []) if s in allowed]
-        show_scatter = len(sel) == 2
+        show_scatter = len(sel) == 2 and corr_mode != "off"
         
-        # Hide scatter container if not exactly 2 coins
+        # Hide scatter container if not exactly 2 coins or correlation is off
         container_style = {
             "marginTop": "20px",
             "display": "block" if show_scatter else "none"
         }
         
         return corr_text, scatter_fig, container_style
+    
+    @app.callback(
+        Output("btn-s0", "style"),
+        Output("btn-s7", "style"),
+        Output("btn-s14", "style"),
+        Output("btn-s30", "style"),
+        Output("btn-view-norm-lin", "style"),
+        Output("btn-view-norm-log", "style"),
+        Output("btn-view-mc-log", "style"),
+        Output("btn-corr-off", "style"),
+        Output("btn-corr-ret", "style"),
+        Input("state", "data"),
+    )
+    def update_button_styles(state):
+        """Update button styles to show active state."""
+        # Base button style
+        button_style = {
+            "padding": "10px 20px",
+            "margin": "4px",
+            "border": "1px solid #dee2e6",
+            "borderRadius": "6px",
+            "backgroundColor": "#ffffff",
+            "color": "#495057",
+            "fontSize": "14px",
+            "fontWeight": "500",
+            "cursor": "pointer",
+            "transition": "all 0.2s ease",
+            "boxShadow": "0 1px 3px rgba(0,0,0,0.1)"
+        }
+        
+        # Active button style
+        active_button_style = {
+            **button_style,
+            "backgroundColor": "#007bff",
+            "color": "#ffffff",
+            "borderColor": "#007bff",
+            "boxShadow": "0 2px 6px rgba(0,123,255,0.3)"
+        }
+        
+        # Get current state values
+        if state is None:
+            smoothing = DEFAULT_SMOOTHING
+            view = DEFAULT_VIEW
+            corr_mode = DEFAULT_CORR_MODE
+        else:
+            smoothing = state.get("smoothing", DEFAULT_SMOOTHING)
+            view = state.get("view", DEFAULT_VIEW)
+            corr_mode = state.get("corr_mode", DEFAULT_CORR_MODE)
+        
+        # Determine which buttons are active
+        s0_active = smoothing == "No smoothing"
+        s7_active = smoothing == "7D SMA"
+        s14_active = smoothing == "14D EMA"
+        s30_active = smoothing == "30D SMA"
+        
+        v_lin_active = view == "Normalized (Linear)"
+        v_log_active = view == "Normalized (Log)"
+        v_mc_active = view == "Market Cap (Log)"
+        
+        c_off_active = corr_mode == "off"
+        c_ret_active = corr_mode == "returns"
+        
+        return (
+            active_button_style if s0_active else button_style,
+            active_button_style if s7_active else button_style,
+            active_button_style if s14_active else button_style,
+            active_button_style if s30_active else button_style,
+            active_button_style if v_lin_active else button_style,
+            active_button_style if v_log_active else button_style,
+            active_button_style if v_mc_active else button_style,
+            active_button_style if c_off_active else button_style,
+            active_button_style if c_ret_active else button_style,
+        )
 
 
 def _generate_data_table(df_raw: pd.DataFrame, meta: Dict, symbols_all: List[str]) -> html.Div:
@@ -714,23 +795,27 @@ def _corr_and_scatter_internal(
     
     # Only consider symbols that are currently traceable
     allowed = set(order or [])
+    # Preserve selection order from selected_syms (don't sort by chart order)
     sel = [s for s in (selected_syms or []) if s in allowed]
     
     if len(sel) != 2:
         return f"Select exactly 2 symbols (currently {len(sel)}).", empty_fig
     
+    # Use selection order (first selected = a, second selected = b)
+    # This ensures correlation and beta reflect the user's selection order
+    # IMPORTANT: sel preserves the order from selected_syms, which maintains selection order
     a, b = sel[0], sel[1]
     
-    # Prepare data for smoothing (same as chart rendering)
+    # Prepare data for smoothing
     df_for_smoothing = _prepare_data_for_smoothing(df_raw)
     
-    # Apply smoothing
+    # Apply smoothing (correlation should use the selected smoothing)
     df_s = apply_smoothing(df_for_smoothing, smoothing)
     
-    # Apply view transformation (normalization if needed) - same as chart rendering
+    # Apply view transformation (correlation should use market cap data from the view)
     df_plot, _, _, normalized_view = _prepare_plot_data(df_s, view)
     
-    # Get series from normalized/transformed data
+    # Get series from transformed data (market cap based on view)
     sA = series_for_symbol(a, df_plot, view)
     sB = series_for_symbol(b, df_plot, view)
     
@@ -755,32 +840,17 @@ def _corr_and_scatter_internal(
     if not rets.empty and rets[a].var() > 0:
         beta = rets[b].cov(rets[a]) / rets[a].var()
     
-    if corr_mode == "returns":
-        corr = rets[a].corr(rets[b])
-        scat = create_returns_scatter(rets, a, b, corr, "returns")
-        if beta is not None:
-            implied_move = beta * 10
-            text = (
-                f"Correlation (daily returns) — {a} vs {b}: {corr*100:.1f}% | "
-                f"beta={beta:.2f} (if {a} +10%, {b} ≈ {implied_move:+.1f}%)"
-            )
-        else:
-            text = f"Correlation (daily returns) — {a} vs {b}: {corr*100:.1f}%"
-        return text, scat
-    
-    # Levels mode: correlate indexed levels
-    idx = df / df.iloc[0] * 100
-    corr = idx[a].corr(idx[b])
-    
-    scat = create_returns_scatter(rets, a, b, corr, "levels")
+    # Calculate correlation from returns
+    corr = rets[a].corr(rets[b])
+    scat = create_returns_scatter(rets, a, b, corr, "returns")
     if beta is not None:
         implied_move = beta * 10
         text = (
-            f"Correlation (indexed levels) — {a} vs {b}: {corr*100:.1f}% | "
+            f"Correlation (daily returns) — {a} vs {b}: {corr*100:.1f}% | "
             f"beta={beta:.2f} (if {a} +10%, {b} ≈ {implied_move:+.1f}%)"
         )
     else:
-        text = f"Correlation (indexed levels) — {a} vs {b}: {corr*100:.1f}%"
+        text = f"Correlation (daily returns) — {a} vs {b}: {corr*100:.1f}%"
     
     return text, scat
 
