@@ -695,35 +695,135 @@
             const correlation = varA > 0 && varB > 0 ? covariance / Math.sqrt(varA * varB) : 0;
             const beta = varA > 0 ? covariance / varA : 0;
             
+            // Split by positive/negative days of coin A
+            const positiveDays = [];
+            const negativeDays = [];
+            
+            for (let i = 0; i < returnsA.length; i++) {
+                if (returnsA[i] > 0) {
+                    positiveDays.push({ a: returnsA[i], b: returnsB[i] });
+                } else if (returnsA[i] < 0) {
+                    negativeDays.push({ a: returnsA[i], b: returnsB[i] });
+                }
+            }
+            
+            // Calculate correlation and beta for positive days
+            let corrPositive = null;
+            let betaPositive = null;
+            if (positiveDays.length >= 10) {
+                const posA = positiveDays.map(d => d.a);
+                const posB = positiveDays.map(d => d.b);
+                const meanPosA = posA.reduce((a, b) => a + b, 0) / posA.length;
+                const meanPosB = posB.reduce((a, b) => a + b, 0) / posB.length;
+                
+                let covPos = 0;
+                let varPosA = 0;
+                let varPosB = 0;
+                for (let i = 0; i < posA.length; i++) {
+                    const diffA = posA[i] - meanPosA;
+                    const diffB = posB[i] - meanPosB;
+                    covPos += diffA * diffB;
+                    varPosA += diffA * diffA;
+                    varPosB += diffB * diffB;
+                }
+                covPos /= posA.length;
+                varPosA /= posA.length;
+                varPosB /= posA.length;
+                
+                if (varPosA > 0 && varPosB > 0) {
+                    corrPositive = covPos / Math.sqrt(varPosA * varPosB);
+                    betaPositive = varPosA > 0 ? covPos / varPosA : 0;
+                }
+            }
+            
+            // Calculate correlation and beta for negative days
+            let corrNegative = null;
+            let betaNegative = null;
+            if (negativeDays.length >= 10) {
+                const negA = negativeDays.map(d => d.a);
+                const negB = negativeDays.map(d => d.b);
+                const meanNegA = negA.reduce((a, b) => a + b, 0) / negA.length;
+                const meanNegB = negB.reduce((a, b) => a + b, 0) / negB.length;
+                
+                let covNeg = 0;
+                let varNegA = 0;
+                let varNegB = 0;
+                for (let i = 0; i < negA.length; i++) {
+                    const diffA = negA[i] - meanNegA;
+                    const diffB = negB[i] - meanNegB;
+                    covNeg += diffA * diffB;
+                    varNegA += diffA * diffA;
+                    varNegB += diffB * diffB;
+                }
+                covNeg /= negA.length;
+                varNegA /= negA.length;
+                varNegB /= negA.length;
+                
+                if (varNegA > 0 && varNegB > 0) {
+                    corrNegative = covNeg / Math.sqrt(varNegA * varNegB);
+                    betaNegative = varNegA > 0 ? covNeg / varNegA : 0;
+                }
+            }
+            
             // Update correlation info
-            const impliedMove = beta * 10;
-            document.getElementById('correlationInfo').innerHTML = 
-                `Correlation (daily returns) — ${coinA} vs ${coinB}: ` +
-                `corr=${(correlation * 100).toFixed(1)}%, ` +
-                `beta=${beta.toFixed(2)} ` +
-                `(if ${coinA} +10%, ${coinB} ≈ ${impliedMove >= 0 ? '+' : ''}${(impliedMove * 100).toFixed(1)}%)`;
+            const impliedMove = beta * 10; // beta is already a ratio, so * 10 gives percentage
+            let infoText = `Correlation (daily returns) — ${coinA} vs ${coinB} | `;
+            infoText += `Overall: corr=${(correlation * 100).toFixed(1)}%, beta=${beta.toFixed(2)} `;
+            infoText += `(if ${coinA} +10%, ${coinB} ≈ ${impliedMove >= 0 ? '+' : ''}${(impliedMove * 100).toFixed(1)}%)`;
+            
+            if (corrPositive !== null && betaPositive !== null) {
+                const impliedPos = betaPositive * 10;
+                infoText += ` | 📈 ${coinA} positive days (${positiveDays.length} days): corr=${(corrPositive * 100).toFixed(1)}%, `;
+                infoText += `beta=${betaPositive.toFixed(2)} (if ${coinA} +10%, ${coinB} ≈ ${impliedPos >= 0 ? '+' : ''}${(impliedPos * 100).toFixed(1)}%)`;
+            }
+            
+            if (corrNegative !== null && betaNegative !== null) {
+                const impliedNeg = betaNegative * -10; // Negative because coin A goes down
+                infoText += ` | 📉 ${coinA} negative days (${negativeDays.length} days): corr=${(corrNegative * 100).toFixed(1)}%, `;
+                infoText += `beta=${betaNegative.toFixed(2)} (if ${coinA} -10%, ${coinB} ≈ ${impliedNeg >= 0 ? '+' : ''}${(impliedNeg * 100).toFixed(1)}%)`;
+            }
+            
+            document.getElementById('correlationInfo').innerHTML = infoText;
             document.getElementById('correlationInfo').style.display = 'block';
             
-            // Create scatter plot
-            const trace = {
-                x: returnsA,
-                y: returnsB,
-                mode: 'markers',
-                name: `${coinA} vs ${coinB}`,
-                marker: { size: 6, opacity: 0.6 },
-                hovertemplate: `<b>${coinA} return</b>: %{x:.2%}<br><b>${coinB} return</b>: %{y:.2%}<extra></extra>`
-            };
+            // Create scatter plot with green/red colors
+            const traces = [];
+            
+            // Positive days (green)
+            if (positiveDays.length > 0) {
+                traces.push({
+                    x: positiveDays.map(d => d.a),
+                    y: positiveDays.map(d => d.b),
+                    mode: 'markers',
+                    name: `${coinA} positive days`,
+                    marker: { size: 6, opacity: 0.6, color: '#28a745' },
+                    hovertemplate: `<b>${coinA} positive day</b><br>${coinA} return: %{x:.2%}<br>${coinB} return: %{y:.2%}<extra></extra>`
+                });
+            }
+            
+            // Negative days (red)
+            if (negativeDays.length > 0) {
+                traces.push({
+                    x: negativeDays.map(d => d.a),
+                    y: negativeDays.map(d => d.b),
+                    mode: 'markers',
+                    name: `${coinA} negative days`,
+                    marker: { size: 6, opacity: 0.6, color: '#dc3545' },
+                    hovertemplate: `<b>${coinA} negative day</b><br>${coinA} return: %{x:.2%}<br>${coinB} return: %{y:.2%}<extra></extra>`
+                });
+            }
             
             const layout = {
                 title: `Returns scatter — ${coinA} vs ${coinB} | corr=${(correlation * 100).toFixed(1)}%`,
                 xaxis: { title: `${coinA} daily return (%)`, tickformat: '.1%' },
                 yaxis: { title: `${coinB} daily return (%)`, tickformat: '.1%' },
                 height: 500,
-                template: 'plotly_white'
+                template: 'plotly_white',
+                legend: { x: 1.02, y: 1, xanchor: 'left', yanchor: 'top' }
             };
             
             document.getElementById('scatterContainer').classList.add('visible');
-            Plotly.newPlot('chart-scatter', [trace], layout, { responsive: true });
+            Plotly.newPlot('chart-scatter', traces, layout, { responsive: true });
         }
 
         function updateCorrelationDisplay() {
