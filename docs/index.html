@@ -173,6 +173,46 @@
             margin-bottom: 20px;
             border-radius: 4px;
         }
+        .info-box {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 30px;
+            margin-top: 40px;
+            margin-bottom: 20px;
+        }
+        .info-box h2 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+        .info-box h3 {
+            color: #495057;
+            margin-top: 25px;
+            margin-bottom: 12px;
+            font-size: 18px;
+        }
+        .info-box p {
+            color: #6c757d;
+            line-height: 1.6;
+            margin-bottom: 12px;
+        }
+        .info-box ul {
+            color: #6c757d;
+            line-height: 1.8;
+            margin-left: 20px;
+            margin-bottom: 15px;
+        }
+        .info-box li {
+            margin-bottom: 8px;
+        }
+        .info-box code {
+            background-color: #e9ecef;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
     </style>
 </head>
 <body>
@@ -243,6 +283,89 @@
                     <tbody id="tableBody">
                     </tbody>
                 </table>
+            </div>
+            
+            <!-- Information Box -->
+            <div class="info-box">
+                <h2>📖 How This Dashboard Works</h2>
+                
+                <h3>Overview</h3>
+                <p>
+                    This interactive dashboard displays cryptocurrency market cap data and correlation analysis 
+                    for Bitcoin (BTC) and Ethereum (ETH). All data is fetched directly from the CoinGecko API 
+                    and processed in your browser using JavaScript.
+                </p>
+                
+                <h3>Controls</h3>
+                <p><strong>Smoothing:</strong></p>
+                <ul>
+                    <li><strong>No smoothing:</strong> Shows raw daily market cap data</li>
+                    <li><strong>7D SMA:</strong> 7-day Simple Moving Average - smooths out short-term volatility</li>
+                    <li><strong>14D EMA:</strong> 14-day Exponential Moving Average - gives more weight to recent data</li>
+                    <li><strong>30D SMA:</strong> 30-day Simple Moving Average - shows longer-term trends</li>
+                </ul>
+                
+                <p><strong>View:</strong></p>
+                <ul>
+                    <li><strong>Normalized (Linear):</strong> All coins start at 100, linear scale - best for comparing relative performance</li>
+                    <li><strong>Normalized (Log):</strong> All coins start at 100, logarithmic scale - better for wide value ranges</li>
+                    <li><strong>Market Cap (Log):</strong> Raw market cap values on logarithmic scale - shows actual dollar amounts</li>
+                </ul>
+                
+                <p><strong>Correlation:</strong></p>
+                <ul>
+                    <li><strong>Off:</strong> Disables correlation analysis</li>
+                    <li><strong>Returns:</strong> Calculates correlation from daily percentage returns (price changes)</li>
+                </ul>
+                
+                <h3>Correlation Analysis</h3>
+                <p>
+                    When "Returns" mode is enabled, the dashboard calculates:
+                </p>
+                <ul>
+                    <li><strong>Overall Correlation:</strong> How BTC and ETH move together across all days</li>
+                    <li><strong>Positive Days:</strong> Correlation when BTC had positive returns (green markers on scatter plot)</li>
+                    <li><strong>Negative Days:</strong> Correlation when BTC had negative returns (red markers on scatter plot)</li>
+                    <li><strong>Beta:</strong> Measures how much ETH moves when BTC moves 1%. Example: beta=1.47 means if BTC goes up 10%, ETH typically goes up 14.7%</li>
+                </ul>
+                
+                <h3>Chart Features</h3>
+                <ul>
+                    <li><strong>Hover Tooltips:</strong> Hover over any point to see date, index/market cap, and price</li>
+                    <li><strong>Interactive Zoom:</strong> Click and drag to zoom, double-click to reset</li>
+                    <li><strong>Legend:</strong> Click legend items to show/hide coins</li>
+                    <li><strong>Scatter Plot:</strong> Shows daily returns correlation with green (positive) and red (negative) markers</li>
+                </ul>
+                
+                <h3>Data Updates</h3>
+                <ul>
+                    <li><strong>Automatic Caching:</strong> Data is cached in your browser for 1 hour to reduce API calls</li>
+                    <li><strong>Manual Refresh:</strong> Click "🔄 Refresh Data" to fetch fresh data from CoinGecko API</li>
+                    <li><strong>Cache Indicator:</strong> Shows "(cached)" when using cached data</li>
+                </ul>
+                
+                <h3>Market Cap Table</h3>
+                <ul>
+                    <li><strong>Sortable:</strong> Click column headers to sort by Rank, Coin, Market Cap, Price, or 24h Change</li>
+                    <li><strong>Color Coding:</strong> Green for positive 24h changes, red for negative</li>
+                    <li><strong>Formatted Numbers:</strong> Large numbers shown as K (thousands), M (millions), B (billions), T (trillions)</li>
+                </ul>
+                
+                <h3>Technical Details</h3>
+                <ul>
+                    <li><strong>Data Source:</strong> CoinGecko Free API (public endpoint)</li>
+                    <li><strong>Update Frequency:</strong> Data cached for 1 hour, manual refresh available</li>
+                    <li><strong>Browser Storage:</strong> Uses localStorage for caching (no server required)</li>
+                    <li><strong>Chart Library:</strong> Plotly.js for interactive visualizations</li>
+                </ul>
+                
+                <h3>Tips</h3>
+                <ul>
+                    <li>Use "Normalized" view to compare relative performance regardless of market cap size</li>
+                    <li>Use smoothing to reduce noise and see trends more clearly</li>
+                    <li>Correlation analysis helps understand how closely two coins move together</li>
+                    <li>Green markers on scatter plot = days when BTC was up, Red = days when BTC was down</li>
+                </ul>
             </div>
         </div>
     </div>
