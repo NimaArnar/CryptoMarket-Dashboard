@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Market Cap Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f8f9fa;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #2c3e50;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 18px;
+            color: #666;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .chart-container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        .table-container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #007bff;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            user-select: none;
+        }
+        th:hover {
+            background-color: #0056b3;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        .sort-indicator {
+            margin-left: 5px;
+        }
+        .refresh-btn {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        .refresh-btn:hover {
+            background-color: #0056b3;
+        }
+        .refresh-btn:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .last-updated {
+            text-align: right;
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Crypto Market Cap Dashboard</h1>
+        
+        <div id="loading" class="loading">Loading data from CoinGecko API...</div>
+        <div id="error" class="error" style="display: none;"></div>
+        
+        <div id="content" style="display: none;">
+            <button class="refresh-btn" onclick="loadData()">🔄 Refresh Data</button>
+            <div class="last-updated" id="lastUpdated"></div>
+            
+            <div class="chart-container">
+                <div id="chart-btc-eth"></div>
+            </div>
+            
+            <div class="table-container">
+                <h2>Market Cap Table</h2>
+                <table id="marketCapTable">
+                    <thead>
+                        <tr>
+                            <th onclick="sortTable(0)">Rank <span class="sort-indicator">↕</span></th>
+                            <th onclick="sortTable(1)">Coin <span class="sort-indicator">↕</span></th>
+                            <th onclick="sortTable(2)">Market Cap (USD) <span class="sort-indicator">↕</span></th>
+                            <th onclick="sortTable(3)">Price (USD) <span class="sort-indicator">↕</span></th>
+                            <th onclick="sortTable(4)">24h Change <span class="sort-indicator">↕</span></th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let marketCapData = [];
+        let sortColumn = -1;
+        let sortDirection = 1;
+
+        // CoinGecko API endpoints
+        const COINGECKO_API = 'https://api.coingecko.com/api/v3';
+        
+        // List of coins to fetch (simplified list)
+        const COINS = [
+            { id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin' },
+            { id: 'ethereum', symbol: 'ETH', name: 'Ethereum' },
+            { id: 'binancecoin', symbol: 'BNB', name: 'BNB' },
+            { id: 'tether', symbol: 'USDT', name: 'Tether' },
+            { id: 'uniswap', symbol: 'UNI', name: 'Uniswap' },
+            { id: 'aave', symbol: 'AAVE', name: 'Aave' },
+            { id: 'chainlink', symbol: 'LINK', name: 'Chainlink' },
+            { id: 'dogecoin', symbol: 'DOGE', name: 'Dogecoin' },
+            { id: 'arbitrum', symbol: 'ARB', name: 'Arbitrum' },
+            { id: 'cosmos', symbol: 'ATOM', name: 'Cosmos' },
+            { id: 'avalanche-2', symbol: 'AVAX', name: 'Avalanche' },
+            { id: 'lido-dao', symbol: 'LDO', name: 'Lido DAO' },
+            { id: 'yearn-finance', symbol: 'YFI', name: 'Yearn Finance' },
+            { id: 'sky', symbol: 'SKY', name: 'Sky' },
+            { id: 'celestia', symbol: 'TIA', name: 'Celestia' },
+            { id: 'wormhole', symbol: 'W', name: 'Wormhole' },
+            { id: 'ankr', symbol: 'ANKR', name: 'Ankr' },
+            { id: '1inch', symbol: '1INCH', name: '1inch' },
+            { id: 'ondo-finance', symbol: 'ONDO', name: 'Ondo Finance' },
+            { id: 'apecoin', symbol: 'APE', name: 'ApeCoin' },
+            { id: 'blur', symbol: 'BLUR', name: 'Blur' },
+            { id: 'decentraland', symbol: 'MANA', name: 'Decentraland' },
+            { id: 'cyberconnect', symbol: 'CYBER', name: 'CyberConnect' },
+            { id: 'chiliz', symbol: 'CHZ', name: 'Chiliz' },
+            { id: 'fartcoin', symbol: 'FART', name: 'Fartcoin' }
+        ];
+
+        async function loadData() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('content').style.display = 'none';
+            document.querySelector('.refresh-btn').disabled = true;
+
+            try {
+                // Fetch market data for all coins
+                const coinIds = COINS.map(c => c.id).join(',');
+                const response = await fetch(
+                    `${COINGECKO_API}/simple/price?ids=${coinIds}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true`
+                );
+                
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status}`);
+                }
+                
+                const priceData = await response.json();
+                
+                // Fetch historical data for BTC and ETH
+                const btcHistory = await fetchHistory('bitcoin');
+                const ethHistory = await fetchHistory('ethereum');
+                
+                // Process market cap data
+                marketCapData = COINS.map(coin => {
+                    const data = priceData[coin.id];
+                    if (!data) return null;
+                    return {
+                        rank: 0, // Will be set after sorting
+                        symbol: coin.symbol,
+                        name: coin.name,
+                        marketCap: data.usd_market_cap || 0,
+                        price: data.usd || 0,
+                        change24h: data.usd_24h_change || 0
+                    };
+                }).filter(item => item !== null);
+                
+                // Sort by market cap descending
+                marketCapData.sort((a, b) => b.marketCap - a.marketCap);
+                marketCapData.forEach((item, index) => {
+                    item.rank = index + 1;
+                });
+                
+                // Render table
+                renderTable();
+                
+                // Render charts
+                renderCharts(btcHistory, ethHistory);
+                
+                // Update last updated time
+                document.getElementById('lastUpdated').textContent = 
+                    `Last updated: ${new Date().toLocaleString()}`;
+                
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+                document.querySelector('.refresh-btn').disabled = false;
+                
+            } catch (error) {
+                console.error('Error loading data:', error);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('error').style.display = 'block';
+                document.getElementById('error').textContent = 
+                    `Error loading data: ${error.message}. Please try again later.`;
+                document.querySelector('.refresh-btn').disabled = false;
+            }
+        }
+
+        async function fetchHistory(coinId) {
+            try {
+                const response = await fetch(
+                    `${COINGECKO_API}/coins/${coinId}/market_chart?vs_currency=usd&days=365&interval=daily`
+                );
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch history for ${coinId}`);
+                }
+                const data = await response.json();
+                
+                // Process market cap data
+                const marketCaps = data.market_cap || [];
+                if (marketCaps.length === 0) return null;
+                
+                // Convert to date-value pairs and normalize to start at 100
+                const dates = [];
+                const values = [];
+                const firstValue = marketCaps[0][1];
+                
+                marketCaps.forEach(([timestamp, value]) => {
+                    if (value > 0 && firstValue > 0) {
+                        dates.push(new Date(timestamp));
+                        values.push((value / firstValue) * 100);
+                    }
+                });
+                
+                return { dates, values };
+            } catch (error) {
+                console.error(`Error fetching history for ${coinId}:`, error);
+                return null;
+            }
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+            
+            marketCapData.forEach(coin => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${coin.rank}</td>
+                    <td><strong>${coin.symbol}</strong> - ${coin.name}</td>
+                    <td>$${formatNumber(coin.marketCap)}</td>
+                    <td>$${formatNumber(coin.price)}</td>
+                    <td style="color: ${coin.change24h >= 0 ? '#28a745' : '#dc3545'}">
+                        ${coin.change24h >= 0 ? '↑' : '↓'} ${coin.change24h.toFixed(2)}%
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function sortTable(column) {
+            if (sortColumn === column) {
+                sortDirection *= -1;
+            } else {
+                sortColumn = column;
+                sortDirection = 1;
+            }
+            
+            marketCapData.sort((a, b) => {
+                let aVal, bVal;
+                switch(column) {
+                    case 0: // Rank
+                        aVal = a.rank;
+                        bVal = b.rank;
+                        break;
+                    case 1: // Coin
+                        aVal = a.symbol;
+                        bVal = b.symbol;
+                        break;
+                    case 2: // Market Cap
+                        aVal = a.marketCap;
+                        bVal = b.marketCap;
+                        break;
+                    case 3: // Price
+                        aVal = a.price;
+                        bVal = b.price;
+                        break;
+                    case 4: // 24h Change
+                        aVal = a.change24h;
+                        bVal = b.change24h;
+                        break;
+                    default:
+                        return 0;
+                }
+                
+                if (typeof aVal === 'string') {
+                    return sortDirection * aVal.localeCompare(bVal);
+                } else {
+                    return sortDirection * (aVal - bVal);
+                }
+            });
+            
+            // Update ranks after sorting
+            marketCapData.forEach((item, index) => {
+                item.rank = index + 1;
+            });
+            
+            renderTable();
+            
+            // Update sort indicators
+            document.querySelectorAll('.sort-indicator').forEach((ind, idx) => {
+                if (idx === column) {
+                    ind.textContent = sortDirection === 1 ? '↑' : '↓';
+                } else {
+                    ind.textContent = '↕';
+                }
+            });
+        }
+
+        function renderCharts(btcHistory, ethHistory) {
+            const traces = [];
+            
+            if (btcHistory) {
+                traces.push({
+                    x: btcHistory.dates,
+                    y: btcHistory.values,
+                    mode: 'lines',
+                    name: 'BTC',
+                    line: { width: 3, color: '#f7931a' }
+                });
+            }
+            
+            if (ethHistory) {
+                traces.push({
+                    x: ethHistory.dates,
+                    y: ethHistory.values,
+                    mode: 'lines',
+                    name: 'ETH',
+                    line: { width: 3, color: '#627eea' }
+                });
+            }
+            
+            const layout = {
+                title: 'BTC vs ETH - Normalized Market Cap (Indexed to 100)',
+                xaxis: { title: 'Date' },
+                yaxis: { title: 'Index (100 = first value)' },
+                hovermode: 'closest',
+                height: 600,
+                template: 'plotly_white',
+                legend: { x: 0.02, y: 0.98 }
+            };
+            
+            Plotly.newPlot('chart-btc-eth', traces, layout, { responsive: true });
+        }
+
+        function formatNumber(num) {
+            if (num >= 1e12) return (num / 1e12).toFixed(2) + 'T';
+            if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';
+            if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M';
+            if (num >= 1e3) return (num / 1e3).toFixed(2) + 'K';
+            return num.toFixed(2);
+        }
+
+        // Load data on page load
+        window.addEventListener('DOMContentLoaded', loadData);
+    </script>
+</body>
+</html>
+
