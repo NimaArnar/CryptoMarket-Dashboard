@@ -21,7 +21,7 @@ from src.constants import (
 from src.data import apply_smoothing, group_filter, normalize_start100, symbols_for_view
 from src.data_manager import DataManager
 from src.utils import setup_logger
-from src.visualization import color_for, compute_usdt_d_index, create_returns_scatter, series_for_symbol
+from src.visualization import color_for, compute_usdt_d_index, create_returns_scatter, create_returns_scatter_split, series_for_symbol
 
 logger = setup_logger(__name__)
 
@@ -835,22 +835,81 @@ def _corr_and_scatter_internal(
     # Calculate returns and correlation
     rets = df.pct_change().dropna()
     
-    # Calculate beta (regression slope)
-    beta = None
-    if not rets.empty and rets[a].var() > 0:
-        beta = rets[b].cov(rets[a]) / rets[a].var()
+    if rets.empty:
+        return "Not enough data to calculate returns.", empty_fig
     
-    # Calculate correlation from returns
-    corr = rets[a].corr(rets[b])
-    scat = create_returns_scatter(rets, a, b, corr, "returns")
-    if beta is not None:
-        implied_move = beta * 10
-        text = (
-            f"Correlation (daily returns) — {a} vs {b}: {corr*100:.1f}% | "
-            f"beta={beta:.2f} (if {a} +10%, {b} ≈ {implied_move:+.1f}%)"
+    # Split returns by positive/negative days of coin A (first selected)
+    positive_mask = rets[a] > 0
+    negative_mask = rets[a] < 0
+    
+    rets_positive = rets[positive_mask]
+    rets_negative = rets[negative_mask]
+    
+    # Calculate overall correlation and beta
+    corr_overall = rets[a].corr(rets[b])
+    beta_overall = None
+    if rets[a].var() > 0:
+        beta_overall = rets[b].cov(rets[a]) / rets[a].var()
+    
+    # Calculate correlation and beta for positive days
+    corr_positive = None
+    beta_positive = None
+    n_positive = len(rets_positive)
+    if n_positive >= 5:  # Need minimum days for meaningful correlation
+        corr_positive = rets_positive[a].corr(rets_positive[b])
+        if rets_positive[a].var() > 0:
+            beta_positive = rets_positive[b].cov(rets_positive[a]) / rets_positive[a].var()
+    
+    # Calculate correlation and beta for negative days
+    corr_negative = None
+    beta_negative = None
+    n_negative = len(rets_negative)
+    if n_negative >= 5:  # Need minimum days for meaningful correlation
+        corr_negative = rets_negative[a].corr(rets_negative[b])
+        if rets_negative[a].var() > 0:
+            beta_negative = rets_negative[b].cov(rets_negative[a]) / rets_negative[a].var()
+    
+    # Create scatter plot with positive/negative coloring
+    scat = create_returns_scatter_split(rets, a, b, corr_overall, rets_positive, rets_negative)
+    
+    # Build text output
+    text_parts = []
+    
+    # Overall statistics
+    if beta_overall is not None:
+        implied_move = beta_overall * 10
+        text_parts.append(
+            f"Overall: corr={corr_overall*100:.1f}%, beta={beta_overall:.2f} "
+            f"(if {a} +10%, {b} ≈ {implied_move:+.1f}%)"
         )
     else:
-        text = f"Correlation (daily returns) — {a} vs {b}: {corr*100:.1f}%"
+        text_parts.append(f"Overall: corr={corr_overall*100:.1f}%")
+    
+    # Positive days statistics
+    if corr_positive is not None and beta_positive is not None:
+        implied_move_pos = beta_positive * 10
+        text_parts.append(
+            f"📈 {a} positive days ({n_positive} days): corr={corr_positive*100:.1f}%, "
+            f"beta={beta_positive:.2f} (if {a} +10%, {b} ≈ {implied_move_pos:+.1f}%)"
+        )
+    elif corr_positive is not None:
+        text_parts.append(
+            f"📈 {a} positive days ({n_positive} days): corr={corr_positive*100:.1f}%"
+        )
+    
+    # Negative days statistics
+    if corr_negative is not None and beta_negative is not None:
+        implied_move_neg = beta_negative * 10
+        text_parts.append(
+            f"📉 {a} negative days ({n_negative} days): corr={corr_negative*100:.1f}%, "
+            f"beta={beta_negative:.2f} (if {a} -10%, {b} ≈ {implied_move_neg:+.1f}%)"
+        )
+    elif corr_negative is not None:
+        text_parts.append(
+            f"📉 {a} negative days ({n_negative} days): corr={corr_negative*100:.1f}%"
+        )
+    
+    text = f"Correlation (daily returns) — {a} vs {b} | " + " | ".join(text_parts)
     
     return text, scat
 

@@ -149,3 +149,98 @@ def create_returns_scatter(
     
     return fig
 
+
+def create_returns_scatter_split(
+    rets: pd.DataFrame,
+    symbol_a: str,
+    symbol_b: str,
+    corr: float,
+    rets_positive: pd.DataFrame,
+    rets_negative: pd.DataFrame
+) -> go.Figure:
+    """
+    Create a scatter plot of returns with positive/negative days colored differently.
+    
+    Args:
+        rets: DataFrame with all returns data
+        symbol_a: First symbol (used to determine positive/negative)
+        symbol_b: Second symbol
+        corr: Overall correlation value
+        rets_positive: DataFrame with returns for days where symbol_a was positive
+        rets_negative: DataFrame with returns for days where symbol_a was negative
+    
+    Returns:
+        Plotly Figure with scatter plot (green for positive days, red for negative days)
+    """
+    fig = go.Figure()
+    
+    # Add positive days (green)
+    if not rets_positive.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=rets_positive[symbol_a],
+                y=rets_positive[symbol_b],
+                mode="markers",
+                name=f"{symbol_a} positive days",
+                marker=dict(size=6, opacity=0.6, color="#28a745"),
+                hovertemplate=(
+                    f"<b>{symbol_a} positive day</b><br>"
+                    f"{symbol_a} return: %{{x:.2%}}<br>"
+                    f"{symbol_b} return: %{{y:.2%}}<extra></extra>"
+                )
+            )
+        )
+    
+    # Add negative days (red)
+    if not rets_negative.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=rets_negative[symbol_a],
+                y=rets_negative[symbol_b],
+                mode="markers",
+                name=f"{symbol_a} negative days",
+                marker=dict(size=6, opacity=0.6, color="#dc3545"),
+                hovertemplate=(
+                    f"<b>{symbol_a} negative day</b><br>"
+                    f"{symbol_a} return: %{{x:.2%}}<br>"
+                    f"{symbol_b} return: %{{y:.2%}}<extra></extra>"
+                )
+            )
+        )
+    
+    # Add zero days (gray) if any - check in the original rets DataFrame
+    # Zero days are those where symbol_a return is exactly 0
+    rets_zero = rets[(rets[symbol_a] == 0) & (rets[symbol_b].notna())]
+    if not rets_zero.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=rets_zero[symbol_a],
+                y=rets_zero[symbol_b],
+                mode="markers",
+                name=f"{symbol_a} zero days",
+                marker=dict(size=6, opacity=0.4, color="#6c757d"),
+                hovertemplate=(
+                    f"<b>{symbol_a} zero day</b><br>"
+                    f"{symbol_a} return: %{{x:.2%}}<br>"
+                    f"{symbol_b} return: %{{y:.2%}}<extra></extra>"
+                )
+            )
+        )
+    
+    fig.update_layout(
+        title=f"Returns scatter — {symbol_a} vs {symbol_b} | corr={corr*100:.1f}%",
+        xaxis_title=f"{symbol_a} daily return (%)",
+        yaxis_title=f"{symbol_b} daily return (%)",
+        xaxis=dict(tickformat=".1%"),
+        yaxis=dict(tickformat=".1%"),
+        margin=dict(t=40, r=30, l=60, b=50),
+        legend=dict(
+            x=1.02,
+            y=1,
+            xanchor="left",
+            yanchor="top"
+        )
+    )
+    
+    return fig
+
