@@ -439,7 +439,25 @@
             };
             
             console.log('Plotting with', traces.length, 'traces');
-            Plotly.newPlot('chart-btc-eth', traces, layout, { responsive: true });
+            console.log('Trace data sample:', traces[0] ? { 
+                name: traces[0].name, 
+                xLength: traces[0].x.length, 
+                yLength: traces[0].y.length,
+                firstX: traces[0].x[0],
+                firstY: traces[0].y[0]
+            } : 'No traces');
+            
+            try {
+                Plotly.newPlot('chart-btc-eth', traces, layout, { responsive: true });
+                console.log('Chart rendered successfully');
+            } catch (plotError) {
+                console.error('Plotly error:', plotError);
+                document.getElementById('chart-btc-eth').innerHTML = 
+                    `<p style="text-align: center; padding: 40px; color: #dc3545;">
+                        Error rendering chart: ${plotError.message}<br>
+                        Check browser console for details.
+                    </p>`;
+            }
         }
 
         function formatNumber(num) {
