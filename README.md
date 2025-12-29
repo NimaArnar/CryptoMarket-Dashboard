@@ -6,7 +6,7 @@ An interactive web dashboard for visualizing cryptocurrency market cap data usin
 
 - 📊 **Interactive Charts**: View market cap trends with multiple smoothing options (7D SMA, 14D EMA, 30D SMA)
 - 📈 **Normalized Views**: Compare coins using normalized indices (linear and log scale)
-- 🔍 **Correlation Analysis**: Scatter plots showing returns correlation between pairs of coins
+- 🔍 **Correlation Analysis**: Scatter plots showing returns correlation between pairs of coins with beta calculation
 - 📋 **Latest Data Table**: View latest price, Q supply, and market cap for all coins in a sortable, filterable table
 - 🎯 **Smart Data Cleaning**: Automatic detection and correction of corrupted circulating supply data
 - ⚡ **Fast Data Loading**: Async parallel fetching for faster startup times
@@ -14,6 +14,8 @@ An interactive web dashboard for visualizing cryptocurrency market cap data usin
 - 📁 **Excel Export**: Export market cap data to Excel files
 - 🎨 **Modern UI**: Clean, intuitive interface with tabbed navigation, improved button styling and larger charts
 - ✅ **Bulk Selection**: Select All/Unselect All buttons for quick coin selection
+- 🎯 **Active Button Indicators**: Selected buttons highlighted with blue color for clear visual feedback
+- 📊 **Smart Correlation Display**: Correlation scatter chart automatically hidden when correlation is off
 
 ## Installation
 
@@ -163,6 +165,16 @@ This ensures market cap accurately reflects price movements even when API supply
 - **Unselect All**: Deselect all coins
 - **Legend Toggle**: Click on legend items to toggle individual coins on/off
 
+### Correlation Analysis
+
+- **Off**: Correlation analysis disabled (scatter chart hidden)
+- **Returns**: Calculate correlation from daily returns (percentage changes)
+  - Shows correlation coefficient (0-100%)
+  - Shows beta (regression slope): how much coin B moves when coin A moves 1%
+  - Example: `beta=1.23 (if BTC +10%, ETH ≈ +12.3%)`
+  - **Selection Order Matters**: Selecting BTC then ETH gives beta of ETH relative to BTC. Selecting ETH then BTC gives beta of BTC relative to ETH
+  - Correlation uses market cap data with the selected view transformation and smoothing
+
 ## Logging
 
 Logs are automatically saved to `./logs/dashboard_YYYYMMDD.log`:
@@ -191,7 +203,14 @@ If you hit rate limits:
 
 ## Recent Updates
 
-### Latest Features (v2.0)
+### Latest Features (v2.1)
+- **Active Button Styling**: Selected buttons (Smoothing, View, Correlation) now highlighted in blue for clear visual feedback
+- **Smart Correlation Display**: Correlation scatter chart automatically hidden when correlation mode is set to "Off"
+- **Improved Tab Design**: Tabs now have rounded corners and smaller, more compact size
+- **Selection Order Preservation**: Beta calculation now respects the order coins are selected (BTC then ETH vs ETH then BTC gives different beta)
+- **Correlation Calculation Fix**: Correlation now correctly uses market cap data with view transformation and selected smoothing
+
+### Previous Features (v2.0)
 - **Tabbed Interface**: Added Charts and Latest Data tabs for better organization
 - **Latest Data Table**: New tab showing Price, Q Supply, and Market Cap for all coins with sorting and filtering
 - **Bulk Selection**: Added Select All/Unselect All buttons for quick coin selection
@@ -215,6 +234,9 @@ If you hit rate limits:
 - Fixed chart rendering issues on initial page load
 - Improved selected coin filtering to match current view/order
 - Fixed table sorting to work with numeric values instead of formatted strings
+- Fixed correlation calculation to use market cap data with view transformation (not raw data)
+- Fixed selection order preservation for consistent beta calculation
+- Removed levels correlation mode (now only returns correlation available)
 
 ## Performance
 
