@@ -284,8 +284,8 @@
         function processHistoryData(data, coinId) {
             console.log(`Data received for ${coinId}:`, Object.keys(data));
             
-            // Process market cap data
-            const marketCaps = data.market_cap || [];
+            // Process market cap data - CoinGecko API returns "market_caps" (plural)
+            const marketCaps = data.market_caps || [];
             console.log(`Market caps array length: ${marketCaps.length}`);
             
             if (marketCaps.length === 0) {
