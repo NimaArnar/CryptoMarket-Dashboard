@@ -818,15 +818,19 @@ def _corr_and_scatter_internal(
     # Get series from transformed data (market cap based on view)
     # IMPORTANT: For USDT.D, always use df_s (raw smoothed) not df_plot (normalized)
     # because USDT.D calculation needs actual market cap values, not normalized ones
+    # For regular coins, using df_plot (normalized) is correct because:
+    # - Returns are scale-invariant (percentage changes), so normalization doesn't affect correlation
+    # - Both coins use the same data source (df_plot), ensuring consistency
+    # - The view transformation (normalized vs raw) is applied consistently to both
     if a == DOM_SYM:
         sA = series_for_symbol(a, df_s, view)  # Use raw smoothed data for USDT.D
     else:
-        sA = series_for_symbol(a, df_plot, view)
+        sA = series_for_symbol(a, df_plot, view)  # Use transformed data (normalized if view is normalized)
     
     if b == DOM_SYM:
         sB = series_for_symbol(b, df_s, view)  # Use raw smoothed data for USDT.D
     else:
-        sB = series_for_symbol(b, df_plot, view)
+        sB = series_for_symbol(b, df_plot, view)  # Use transformed data (normalized if view is normalized)
     
     if sA is None or sB is None:
         return f"Cannot compute series for {a} or {b} in this view.", empty_fig
