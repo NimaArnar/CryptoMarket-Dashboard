@@ -169,11 +169,21 @@ This ensures market cap accurately reflects price movements even when API supply
 
 - **Off**: Correlation analysis disabled (scatter chart hidden)
 - **Returns**: Calculate correlation from daily returns (percentage changes)
-  - Shows correlation coefficient (0-100%)
-  - Shows beta (regression slope): how much coin B moves when coin A moves 1%
-  - Example: `beta=1.23 (if BTC +10%, ETH ≈ +12.3%)`
+  - Shows **overall correlation** and beta across all days
+  - Shows **split analysis** when 2 coins are selected:
+    - **Positive days**: Correlation and beta for days when the first selected coin had positive returns
+    - **Negative days**: Correlation and beta for days when the first selected coin had negative returns
+    - Example output:
+      ```
+      Overall: corr=81.6%, beta=1.47 (if BTC +10%, ETH ≈ +14.7%)
+      📈 BTC positive days (185 days): corr=67.2%, beta=1.47
+      📉 BTC negative days (179 days): corr=78.4%, beta=1.68 (if BTC -10%, ETH ≈ -16.8%)
+      ```
+  - **Scatter Plot**: Green markers for positive days, red markers for negative days
+  - **Beta Calculation**: Shows how much coin B moves when coin A moves 1%
   - **Selection Order Matters**: Selecting BTC then ETH gives beta of ETH relative to BTC. Selecting ETH then BTC gives beta of BTC relative to ETH
   - Correlation uses market cap data with the selected view transformation and smoothing
+  - **Note**: Subset correlations (positive/negative days) can differ from overall correlation - this is mathematically valid and reflects different relationship structures in different market conditions
 
 ## Logging
 
@@ -203,7 +213,16 @@ If you hit rate limits:
 
 ## Recent Updates
 
-### Latest Features (v2.1)
+### Latest Features (v2.2)
+- **Split Correlation Analysis**: New feature that calculates separate correlation and beta for positive vs negative return days
+  - When 2 coins are selected, shows overall correlation plus correlation for days when the first coin was positive vs negative
+  - Scatter plot uses green markers for positive days and red markers for negative days
+  - Reveals how correlation structure differs in up vs down markets
+- **USDT.D Correlation Fix**: Fixed USDT.D correlation calculation to use raw market cap data instead of normalized data
+- **Enhanced Validation**: Added NaN checks and minimum data validation for more robust correlation calculations
+- **Improved Documentation**: Added explanatory comments about subset correlations and their mathematical validity
+
+### Previous Features (v2.1)
 - **Active Button Styling**: Selected buttons (Smoothing, View, Correlation) now highlighted in blue for clear visual feedback
 - **Smart Correlation Display**: Correlation scatter chart automatically hidden when correlation mode is set to "Off"
 - **Improved Tab Design**: Tabs now have rounded corners and smaller, more compact size
