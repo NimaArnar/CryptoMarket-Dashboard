@@ -816,8 +816,17 @@ def _corr_and_scatter_internal(
     df_plot, _, _, normalized_view = _prepare_plot_data(df_s, view)
     
     # Get series from transformed data (market cap based on view)
-    sA = series_for_symbol(a, df_plot, view)
-    sB = series_for_symbol(b, df_plot, view)
+    # IMPORTANT: For USDT.D, always use df_s (raw smoothed) not df_plot (normalized)
+    # because USDT.D calculation needs actual market cap values, not normalized ones
+    if a == DOM_SYM:
+        sA = series_for_symbol(a, df_s, view)  # Use raw smoothed data for USDT.D
+    else:
+        sA = series_for_symbol(a, df_plot, view)
+    
+    if b == DOM_SYM:
+        sB = series_for_symbol(b, df_s, view)  # Use raw smoothed data for USDT.D
+    else:
+        sB = series_for_symbol(b, df_plot, view)
     
     if sA is None or sB is None:
         return f"Cannot compute series for {a} or {b} in this view.", empty_fig
