@@ -40,15 +40,6 @@ Your app will be available at: `https://crypto-market-dashboard.onrender.com`
    git push heroku main
    ```
 
-## Option 3: Use GitHub Pages for Documentation
-
-While you can't host the Dash app on GitHub Pages, you can:
-
-1. **Create a `docs/` folder** in your repo
-2. **Add an `index.html`** that links to your deployed app
-3. **Enable GitHub Pages** in repo settings → Pages → Source: `docs/` folder
-4. Your docs will be at: `https://NimaArnar.github.io/CryptoMarket-Dashboard/`
-
 ## Environment Variables
 
 For cloud deployment, you may want to set:
