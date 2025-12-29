@@ -104,10 +104,13 @@ python main.py
 
 ```
 CryptoMarket-Dashboard/
-├── main.py                          # Entry point
+├── main.py                          # Entry point (Python application)
 ├── requirements.txt                 # Python dependencies
 ├── README.md                        # This file
+├── DEPLOYMENT.md                    # Deployment guide
 ├── .gitignore                      # Git ignore rules
+├── docs/                            # GitHub Pages web version
+│   └── index.html                  # Interactive JavaScript dashboard
 ├── src/                            # Source code
 │   ├── __init__.py
 │   ├── config.py                   # Configuration settings
