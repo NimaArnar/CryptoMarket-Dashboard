@@ -252,7 +252,19 @@
                 const url = `${COINGECKO_API}/coins/${coinId}/market_chart?vs_currency=usd&days=365&interval=daily`;
                 console.log(`URL: ${url}`);
                 
-                const response = await fetch(url);
+                let response;
+                try {
+                    response = await fetch(url);
+                } catch (fetchError) {
+                    // CORS error - try with a proxy
+                    console.warn(`Direct fetch failed, trying CORS proxy for ${coinId}:`, fetchError);
+                    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+                    const proxyResponse = await fetch(proxyUrl);
+                    const proxyData = await proxyResponse.json();
+                    const data = JSON.parse(proxyData.contents);
+                    return processHistoryData(data, coinId);
+                }
+                
                 console.log(`Response status: ${response.status}`);
                 
                 if (!response.ok) {
@@ -262,36 +274,40 @@
                 }
                 
                 const data = await response.json();
-                console.log(`Data received for ${coinId}:`, Object.keys(data));
-                
-                // Process market cap data
-                const marketCaps = data.market_cap || [];
-                console.log(`Market caps array length: ${marketCaps.length}`);
-                
-                if (marketCaps.length === 0) {
-                    console.warn(`No market cap data for ${coinId}`);
-                    return null;
-                }
-                
-                // Convert to date-value pairs and normalize to start at 100
-                const dates = [];
-                const values = [];
-                const firstValue = marketCaps[0][1];
-                console.log(`First market cap value: ${firstValue}`);
-                
-                marketCaps.forEach(([timestamp, value]) => {
-                    if (value > 0 && firstValue > 0) {
-                        dates.push(new Date(timestamp));
-                        values.push((value / firstValue) * 100);
-                    }
-                });
-                
-                console.log(`Processed ${dates.length} data points for ${coinId}`);
-                return { dates, values };
+                return processHistoryData(data, coinId);
             } catch (error) {
                 console.error(`Error fetching history for ${coinId}:`, error);
                 return null;
             }
+        }
+
+        function processHistoryData(data, coinId) {
+            console.log(`Data received for ${coinId}:`, Object.keys(data));
+            
+            // Process market cap data
+            const marketCaps = data.market_cap || [];
+            console.log(`Market caps array length: ${marketCaps.length}`);
+            
+            if (marketCaps.length === 0) {
+                console.warn(`No market cap data for ${coinId}`);
+                return null;
+            }
+            
+            // Convert to date-value pairs and normalize to start at 100
+            const dates = [];
+            const values = [];
+            const firstValue = marketCaps[0][1];
+            console.log(`First market cap value: ${firstValue}`);
+            
+            marketCaps.forEach(([timestamp, value]) => {
+                if (value > 0 && firstValue > 0) {
+                    dates.push(new Date(timestamp));
+                    values.push((value / firstValue) * 100);
+                }
+            });
+            
+            console.log(`Processed ${dates.length} data points for ${coinId}`);
+            return { dates, values };
         }
 
         function renderTable() {
