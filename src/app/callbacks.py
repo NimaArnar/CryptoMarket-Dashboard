@@ -899,7 +899,8 @@ def _corr_and_scatter_internal(
     
     # Negative days statistics
     if corr_negative is not None and beta_negative is not None:
-        implied_move_neg = beta_negative * 10
+        # When coin A goes down 10%, coin B should also go down (negative move)
+        implied_move_neg = beta_negative * -10
         text_parts.append(
             f"📉 {a} negative days ({n_negative} days): corr={corr_negative*100:.1f}%, "
             f"beta={beta_negative:.2f} (if {a} -10%, {b} ≈ {implied_move_neg:+.1f}%)"
