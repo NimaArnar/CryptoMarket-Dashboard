@@ -860,6 +860,9 @@ def _corr_and_scatter_internal(
         )
     
     # Split returns by positive/negative days of coin A (first selected)
+    # NOTE: Subset correlations (positive/negative days) can differ from overall correlation
+    # This is mathematically valid and reflects different relationship structures
+    # in different market conditions (e.g., stronger correlation in down markets)
     positive_mask = rets[a] > 0
     negative_mask = rets[a] < 0
     
