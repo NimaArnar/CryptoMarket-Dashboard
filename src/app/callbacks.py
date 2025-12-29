@@ -838,6 +838,14 @@ def _corr_and_scatter_internal(
     if rets.empty:
         return "Not enough data to calculate returns.", empty_fig
     
+    # Check if we have enough data points after calculating returns
+    if len(rets) < MIN_CORR_DAYS:
+        return (
+            f"Not enough data points for correlation after calculating returns "
+            f"(need ≥{MIN_CORR_DAYS} days, got {len(rets)}).",
+            empty_fig,
+        )
+    
     # Split returns by positive/negative days of coin A (first selected)
     positive_mask = rets[a] > 0
     negative_mask = rets[a] < 0
@@ -846,28 +854,44 @@ def _corr_and_scatter_internal(
     rets_negative = rets[negative_mask]
     
     # Calculate overall correlation and beta
+    # Check for NaN (can happen if one series is constant or insufficient data)
     corr_overall = rets[a].corr(rets[b])
+    if pd.isna(corr_overall):
+        return f"Cannot calculate correlation: insufficient variance in {a} or {b} returns.", empty_fig
+    
     beta_overall = None
-    if rets[a].var() > 0:
+    if rets[a].var() > 0 and not pd.isna(rets[a].var()):
         beta_overall = rets[b].cov(rets[a]) / rets[a].var()
+        if pd.isna(beta_overall):
+            beta_overall = None
     
     # Calculate correlation and beta for positive days
     corr_positive = None
     beta_positive = None
     n_positive = len(rets_positive)
-    if n_positive >= 5:  # Need minimum days for meaningful correlation
+    if n_positive >= MIN_CORR_DAYS:  # Use MIN_CORR_DAYS for consistency
         corr_positive = rets_positive[a].corr(rets_positive[b])
-        if rets_positive[a].var() > 0:
+        # Check if correlation is valid (not NaN)
+        if pd.isna(corr_positive):
+            corr_positive = None
+        elif rets_positive[a].var() > 0 and not pd.isna(rets_positive[a].var()):
             beta_positive = rets_positive[b].cov(rets_positive[a]) / rets_positive[a].var()
+            if pd.isna(beta_positive):
+                beta_positive = None
     
     # Calculate correlation and beta for negative days
     corr_negative = None
     beta_negative = None
     n_negative = len(rets_negative)
-    if n_negative >= 5:  # Need minimum days for meaningful correlation
+    if n_negative >= MIN_CORR_DAYS:  # Use MIN_CORR_DAYS for consistency
         corr_negative = rets_negative[a].corr(rets_negative[b])
-        if rets_negative[a].var() > 0:
+        # Check if correlation is valid (not NaN)
+        if pd.isna(corr_negative):
+            corr_negative = None
+        elif rets_negative[a].var() > 0 and not pd.isna(rets_negative[a].var()):
             beta_negative = rets_negative[b].cov(rets_negative[a]) / rets_negative[a].var()
+            if pd.isna(beta_negative):
+                beta_negative = None
     
     # Create scatter plot with positive/negative coloring
     scat = create_returns_scatter_split(rets, a, b, corr_overall, rets_positive, rets_negative)
