@@ -39,12 +39,76 @@
             border-radius: 5px;
             margin-bottom: 20px;
         }
+        .controls-panel {
+            display: flex;
+            gap: 24px;
+            flex-wrap: wrap;
+            padding: 16px;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+            margin-bottom: 20px;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .control-label {
+            font-weight: 600;
+            font-size: 13px;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        .button-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+        .btn {
+            padding: 10px 20px;
+            margin: 0;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background-color: #ffffff;
+            color: #495057;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .btn:hover {
+            background-color: #f8f9fa;
+            border-color: #adb5bd;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+        }
+        .btn.active {
+            background-color: #007bff;
+            color: #ffffff;
+            border-color: #007bff;
+            box-shadow: 0 2px 6px rgba(0,123,255,0.3);
+        }
         .chart-container {
             background-color: white;
             padding: 30px;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
             margin-bottom: 30px;
+        }
+        .scatter-container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+            display: none;
+        }
+        .scatter-container.visible {
+            display: block;
         }
         .table-container {
             background-color: white;
@@ -102,6 +166,13 @@
             font-size: 14px;
             margin-bottom: 10px;
         }
+        .correlation-info {
+            padding: 15px;
+            background-color: #e7f3ff;
+            border-left: 4px solid #007bff;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
@@ -115,10 +186,48 @@
             <button class="refresh-btn" onclick="loadData()">🔄 Refresh Data</button>
             <div class="last-updated" id="lastUpdated"></div>
             
-            <div class="chart-container">
-                <div id="chart-btc-eth"></div>
+            <!-- Controls Panel -->
+            <div class="controls-panel">
+                <div class="control-group">
+                    <div class="control-label">Smoothing</div>
+                    <div class="button-group">
+                        <button class="btn active" id="btn-s0" onclick="setSmoothing('No smoothing')">No smoothing</button>
+                        <button class="btn" id="btn-s7" onclick="setSmoothing('7D SMA')">7D SMA</button>
+                        <button class="btn" id="btn-s14" onclick="setSmoothing('14D EMA')">14D EMA</button>
+                        <button class="btn" id="btn-s30" onclick="setSmoothing('30D SMA')">30D SMA</button>
+                    </div>
+                </div>
+                <div class="control-group">
+                    <div class="control-label">View</div>
+                    <div class="button-group">
+                        <button class="btn active" id="btn-view-norm-lin" onclick="setView('Normalized (Linear)')">Normalized (Linear)</button>
+                        <button class="btn" id="btn-view-norm-log" onclick="setView('Normalized (Log)')">Normalized (Log)</button>
+                        <button class="btn" id="btn-view-mc-log" onclick="setView('Market Cap (Log)')">Market Cap (Log)</button>
+                    </div>
+                </div>
+                <div class="control-group">
+                    <div class="control-label">Correlation</div>
+                    <div class="button-group">
+                        <button class="btn active" id="btn-corr-off" onclick="setCorrelation('off')">Off</button>
+                        <button class="btn" id="btn-corr-ret" onclick="setCorrelation('returns')">Returns</button>
+                    </div>
+                </div>
             </div>
             
+            <!-- Correlation Info -->
+            <div id="correlationInfo" class="correlation-info" style="display: none;"></div>
+            
+            <!-- Main Chart -->
+            <div class="chart-container">
+                <div id="chart-main"></div>
+            </div>
+            
+            <!-- Correlation Scatter Chart -->
+            <div id="scatterContainer" class="scatter-container">
+                <div id="chart-scatter"></div>
+            </div>
+            
+            <!-- Market Cap Table -->
             <div class="table-container">
                 <h2>Market Cap Table</h2>
                 <table id="marketCapTable">
@@ -139,14 +248,23 @@
     </div>
 
     <script>
+        // State
+        let rawData = {};
+        let priceData = {};
         let marketCapData = [];
         let sortColumn = -1;
         let sortDirection = 1;
-
-        // CoinGecko API endpoints
+        
+        // Settings
+        let currentSmoothing = 'No smoothing';
+        let currentView = 'Normalized (Linear)';
+        let currentCorrelation = 'off';
+        let selectedCoins = ['BTC', 'ETH']; // Default selection
+        
+        // CoinGecko API
         const COINGECKO_API = 'https://api.coingecko.com/api/v3';
         
-        // List of coins to fetch (simplified list)
+        // List of coins
         const COINS = [
             { id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin' },
             { id: 'ethereum', symbol: 'ETH', name: 'Ethereum' },
@@ -175,6 +293,87 @@
             { id: 'fartcoin', symbol: 'FART', name: 'Fartcoin' }
         ];
 
+        // Smoothing functions
+        function applySMA(data, window) {
+            const result = [];
+            for (let i = 0; i < data.length; i++) {
+                const start = Math.max(0, i - window + 1);
+                const slice = data.slice(start, i + 1);
+                const sum = slice.reduce((a, b) => a + (b || 0), 0);
+                result.push(sum / slice.length);
+            }
+            return result;
+        }
+
+        function applyEMA(data, span) {
+            const result = [];
+            const alpha = 2 / (span + 1);
+            let ema = data[0] || 0;
+            result.push(ema);
+            
+            for (let i = 1; i < data.length; i++) {
+                if (data[i] != null && data[i] !== 0) {
+                    ema = alpha * data[i] + (1 - alpha) * ema;
+                }
+                result.push(ema);
+            }
+            return result;
+        }
+
+        function applySmoothing(data, smoothing) {
+            if (smoothing === 'No smoothing') return data;
+            if (smoothing === '7D SMA') return applySMA(data, 7);
+            if (smoothing === '14D EMA') return applyEMA(data, 14);
+            if (smoothing === '30D SMA') return applySMA(data, 30);
+            return data;
+        }
+
+        function normalizeTo100(data) {
+            if (!data || data.length === 0) return data;
+            const firstValid = data.find(v => v != null && v > 0);
+            if (!firstValid) return data;
+            return data.map(v => v != null && v > 0 ? (v / firstValid) * 100 : null);
+        }
+
+        // Control functions
+        function setSmoothing(smoothing) {
+            currentSmoothing = smoothing;
+            updateButtonStates('smoothing', smoothing);
+            renderCharts();
+        }
+
+        function setView(view) {
+            currentView = view;
+            updateButtonStates('view', view);
+            renderCharts();
+        }
+
+        function setCorrelation(corr) {
+            currentCorrelation = corr;
+            updateButtonStates('correlation', corr);
+            renderCharts();
+            updateCorrelationDisplay();
+        }
+
+        function updateButtonStates(type, value) {
+            if (type === 'smoothing') {
+                document.querySelectorAll('[id^="btn-s"]').forEach(btn => btn.classList.remove('active'));
+                if (value === 'No smoothing') document.getElementById('btn-s0').classList.add('active');
+                if (value === '7D SMA') document.getElementById('btn-s7').classList.add('active');
+                if (value === '14D EMA') document.getElementById('btn-s14').classList.add('active');
+                if (value === '30D SMA') document.getElementById('btn-s30').classList.add('active');
+            } else if (type === 'view') {
+                document.querySelectorAll('[id^="btn-view"]').forEach(btn => btn.classList.remove('active'));
+                if (value === 'Normalized (Linear)') document.getElementById('btn-view-norm-lin').classList.add('active');
+                if (value === 'Normalized (Log)') document.getElementById('btn-view-norm-log').classList.add('active');
+                if (value === 'Market Cap (Log)') document.getElementById('btn-view-mc-log').classList.add('active');
+            } else if (type === 'correlation') {
+                document.querySelectorAll('[id^="btn-corr"]').forEach(btn => btn.classList.remove('active'));
+                if (value === 'off') document.getElementById('btn-corr-off').classList.add('active');
+                if (value === 'returns') document.getElementById('btn-corr-ret').classList.add('active');
+            }
+        }
+
         async function loadData() {
             document.getElementById('loading').style.display = 'block';
             document.getElementById('error').style.display = 'none';
@@ -192,22 +391,32 @@
                     throw new Error(`API error: ${response.status}`);
                 }
                 
-                const priceData = await response.json();
+                const priceDataResponse = await response.json();
                 
-                // Fetch historical data for BTC and ETH (in parallel)
-                console.log('Fetching historical data...');
-                const [btcHistory, ethHistory] = await Promise.all([
-                    fetchHistory('bitcoin'),
-                    fetchHistory('ethereum')
-                ]);
-                console.log('Historical data fetched:', { btcHistory, ethHistory });
+                // Fetch historical data for selected coins
+                const historyPromises = selectedCoins.map(symbol => {
+                    const coin = COINS.find(c => c.symbol === symbol);
+                    return coin ? fetchHistory(coin.id, coin.symbol) : Promise.resolve(null);
+                });
+                
+                const histories = await Promise.all(historyPromises);
+                
+                // Store raw data
+                rawData = {};
+                priceData = {};
+                histories.forEach((history, idx) => {
+                    if (history) {
+                        rawData[history.symbol] = history;
+                        priceData[history.symbol] = history.prices;
+                    }
+                });
                 
                 // Process market cap data
                 marketCapData = COINS.map(coin => {
-                    const data = priceData[coin.id];
+                    const data = priceDataResponse[coin.id];
                     if (!data) return null;
                     return {
-                        rank: 0, // Will be set after sorting
+                        rank: 0,
                         symbol: coin.symbol,
                         name: coin.name,
                         marketCap: data.usd_market_cap || 0,
@@ -222,11 +431,10 @@
                     item.rank = index + 1;
                 });
                 
-                // Render table
+                // Render
                 renderTable();
-                
-                // Render charts
-                renderCharts(btcHistory, ethHistory);
+                renderCharts();
+                updateCorrelationDisplay();
                 
                 // Update last updated time
                 document.getElementById('lastUpdated').textContent = 
@@ -246,68 +454,283 @@
             }
         }
 
-        async function fetchHistory(coinId) {
+        async function fetchHistory(coinId, symbol) {
             try {
-                console.log(`Fetching history for ${coinId}...`);
                 const url = `${COINGECKO_API}/coins/${coinId}/market_chart?vs_currency=usd&days=365&interval=daily`;
-                console.log(`URL: ${url}`);
-                
                 let response;
+                
                 try {
                     response = await fetch(url);
                 } catch (fetchError) {
                     // CORS error - try with a proxy
-                    console.warn(`Direct fetch failed, trying CORS proxy for ${coinId}:`, fetchError);
                     const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
                     const proxyResponse = await fetch(proxyUrl);
                     const proxyData = await proxyResponse.json();
                     const data = JSON.parse(proxyData.contents);
-                    return processHistoryData(data, coinId);
+                    return processHistoryData(data, symbol);
                 }
                 
-                console.log(`Response status: ${response.status}`);
-                
                 if (!response.ok) {
-                    const errorText = await response.text();
-                    console.error(`API error for ${coinId}:`, response.status, errorText);
                     throw new Error(`Failed to fetch history for ${coinId}: ${response.status}`);
                 }
                 
                 const data = await response.json();
-                return processHistoryData(data, coinId);
+                return processHistoryData(data, symbol);
             } catch (error) {
                 console.error(`Error fetching history for ${coinId}:`, error);
                 return null;
             }
         }
 
-        function processHistoryData(data, coinId) {
-            console.log(`Data received for ${coinId}:`, Object.keys(data));
-            
-            // Process market cap data - CoinGecko API returns "market_caps" (plural)
+        function processHistoryData(data, symbol) {
             const marketCaps = data.market_caps || [];
-            console.log(`Market caps array length: ${marketCaps.length}`);
+            const prices = data.prices || [];
             
-            if (marketCaps.length === 0) {
-                console.warn(`No market cap data for ${coinId}`);
-                return null;
-            }
+            if (marketCaps.length === 0) return null;
             
-            // Convert to date-value pairs and normalize to start at 100
             const dates = [];
-            const values = [];
-            const firstValue = marketCaps[0][1];
-            console.log(`First market cap value: ${firstValue}`);
+            const marketCapValues = [];
+            const priceValues = [];
             
-            marketCaps.forEach(([timestamp, value]) => {
-                if (value > 0 && firstValue > 0) {
+            marketCaps.forEach(([timestamp, mc]) => {
+                if (mc > 0) {
                     dates.push(new Date(timestamp));
-                    values.push((value / firstValue) * 100);
+                    marketCapValues.push(mc);
                 }
             });
             
-            console.log(`Processed ${dates.length} data points for ${coinId}`);
-            return { dates, values };
+            // Align prices with market caps
+            const priceMap = new Map();
+            prices.forEach(([timestamp, price]) => {
+                const date = new Date(timestamp);
+                priceMap.set(date.getTime(), price);
+            });
+            
+            dates.forEach(date => {
+                const price = priceMap.get(date.getTime()) || null;
+                priceValues.push(price);
+            });
+            
+            return {
+                symbol,
+                dates,
+                marketCaps: marketCapValues,
+                prices: priceValues
+            };
+        }
+
+        function renderCharts() {
+            if (!rawData || Object.keys(rawData).length === 0) return;
+            
+            const traces = [];
+            const isLog = currentView.includes('Log');
+            const isNormalized = currentView.includes('Normalized');
+            
+            selectedCoins.forEach(symbol => {
+                const data = rawData[symbol];
+                if (!data) return;
+                
+                let values = [...data.marketCaps];
+                
+                // Apply smoothing
+                values = applySmoothing(values, currentSmoothing);
+                
+                // Apply view transformation
+                if (isNormalized) {
+                    values = normalizeTo100(values);
+                }
+                
+                // Filter out null/zero values
+                const filteredDates = [];
+                const filteredValues = [];
+                const filteredPrices = [];
+                
+                values.forEach((val, idx) => {
+                    if (val != null && val > 0) {
+                        filteredDates.push(data.dates[idx]);
+                        filteredValues.push(val);
+                        filteredPrices.push(data.prices[idx]);
+                    }
+                });
+                
+                if (filteredValues.length === 0) return;
+                
+                // Create hover text with price
+                const hoverText = filteredValues.map((val, idx) => {
+                    const price = filteredPrices[idx];
+                    const priceStr = price ? `$${formatNumber(price)}` : 'N/A';
+                    const dateStr = filteredDates[idx].toLocaleDateString();
+                    if (isNormalized) {
+                        return `${symbol}<br>Date: ${dateStr}<br>Index: ${val.toFixed(2)}<br>Price: ${priceStr}`;
+                    } else {
+                        return `${symbol}<br>Date: ${dateStr}<br>Market Cap: $${formatNumber(val)}<br>Price: ${priceStr}`;
+                    }
+                });
+                
+                traces.push({
+                    x: filteredDates,
+                    y: filteredValues,
+                    mode: 'lines',
+                    name: symbol,
+                    line: { width: 3 },
+                    text: hoverText,
+                    hovertemplate: '%{text}<extra></extra>'
+                });
+            });
+            
+            if (traces.length === 0) {
+                document.getElementById('chart-main').innerHTML = 
+                    '<p style="text-align: center; padding: 40px; color: #666;">No data available for selected coins.</p>';
+                return;
+            }
+            
+            const yAxisTitle = isNormalized 
+                ? 'Index (100 = first value)' 
+                : 'Market Cap (USD)';
+            
+            const layout = {
+                title: isNormalized 
+                    ? 'BTC vs ETH - Normalized Market Cap (Indexed to 100)'
+                    : 'BTC vs ETH - Market Cap',
+                xaxis: { title: 'Date' },
+                yaxis: { 
+                    title: yAxisTitle,
+                    type: isLog ? 'log' : 'linear'
+                },
+                hovermode: 'closest',
+                height: 600,
+                template: 'plotly_white',
+                legend: { x: 0.02, y: 0.98 }
+            };
+            
+            Plotly.newPlot('chart-main', traces, layout, { responsive: true });
+            
+            // Render correlation if enabled
+            if (currentCorrelation === 'returns' && selectedCoins.length === 2) {
+                renderCorrelation();
+            }
+        }
+
+        function renderCorrelation() {
+            if (selectedCoins.length !== 2) {
+                document.getElementById('scatterContainer').classList.remove('visible');
+                return;
+            }
+            
+            const [coinA, coinB] = selectedCoins;
+            const dataA = rawData[coinA];
+            const dataB = rawData[coinB];
+            
+            if (!dataA || !dataB) {
+                document.getElementById('scatterContainer').classList.remove('visible');
+                return;
+            }
+            
+            // Align data by date
+            const alignedData = [];
+            const dateMapB = new Map();
+            dataB.dates.forEach((date, idx) => {
+                dateMapB.set(date.getTime(), { mc: dataB.marketCaps[idx], price: dataB.prices[idx] });
+            });
+            
+            dataA.dates.forEach((date, idx) => {
+                const bData = dateMapB.get(date.getTime());
+                if (bData && dataA.marketCaps[idx] > 0 && bData.mc > 0) {
+                    alignedData.push({
+                        date,
+                        aMc: dataA.marketCaps[idx],
+                        bMc: bData.mc,
+                        aPrice: dataA.prices[idx],
+                        bPrice: bData.price
+                    });
+                }
+            });
+            
+            if (alignedData.length < 10) {
+                document.getElementById('scatterContainer').classList.remove('visible');
+                return;
+            }
+            
+            // Calculate returns
+            const returnsA = [];
+            const returnsB = [];
+            
+            for (let i = 1; i < alignedData.length; i++) {
+                const prevA = alignedData[i-1].aMc;
+                const currA = alignedData[i].aMc;
+                const prevB = alignedData[i-1].bMc;
+                const currB = alignedData[i].bMc;
+                
+                if (prevA > 0 && currA > 0 && prevB > 0 && currB > 0) {
+                    returnsA.push((currA - prevA) / prevA);
+                    returnsB.push((currB - prevB) / prevB);
+                }
+            }
+            
+            if (returnsA.length < 10) {
+                document.getElementById('scatterContainer').classList.remove('visible');
+                return;
+            }
+            
+            // Calculate correlation
+            const meanA = returnsA.reduce((a, b) => a + b, 0) / returnsA.length;
+            const meanB = returnsB.reduce((a, b) => a + b, 0) / returnsB.length;
+            
+            let covariance = 0;
+            let varA = 0;
+            let varB = 0;
+            
+            for (let i = 0; i < returnsA.length; i++) {
+                const diffA = returnsA[i] - meanA;
+                const diffB = returnsB[i] - meanB;
+                covariance += diffA * diffB;
+                varA += diffA * diffA;
+                varB += diffB * diffB;
+            }
+            
+            covariance /= returnsA.length;
+            varA /= returnsA.length;
+            varB /= returnsA.length;
+            
+            const correlation = varA > 0 && varB > 0 ? covariance / Math.sqrt(varA * varB) : 0;
+            const beta = varA > 0 ? covariance / varA : 0;
+            
+            // Update correlation info
+            const impliedMove = beta * 10;
+            document.getElementById('correlationInfo').innerHTML = 
+                `Correlation (daily returns) — ${coinA} vs ${coinB}: ` +
+                `corr=${(correlation * 100).toFixed(1)}%, ` +
+                `beta=${beta.toFixed(2)} ` +
+                `(if ${coinA} +10%, ${coinB} ≈ ${impliedMove >= 0 ? '+' : ''}${(impliedMove * 100).toFixed(1)}%)`;
+            document.getElementById('correlationInfo').style.display = 'block';
+            
+            // Create scatter plot
+            const trace = {
+                x: returnsA,
+                y: returnsB,
+                mode: 'markers',
+                name: `${coinA} vs ${coinB}`,
+                marker: { size: 6, opacity: 0.6 },
+                hovertemplate: `<b>${coinA} return</b>: %{x:.2%}<br><b>${coinB} return</b>: %{y:.2%}<extra></extra>`
+            };
+            
+            const layout = {
+                title: `Returns scatter — ${coinA} vs ${coinB} | corr=${(correlation * 100).toFixed(1)}%`,
+                xaxis: { title: `${coinA} daily return (%)`, tickformat: '.1%' },
+                yaxis: { title: `${coinB} daily return (%)`, tickformat: '.1%' },
+                height: 500,
+                template: 'plotly_white'
+            };
+            
+            document.getElementById('scatterContainer').classList.add('visible');
+            Plotly.newPlot('chart-scatter', [trace], layout, { responsive: true });
+        }
+
+        function updateCorrelationDisplay() {
+            if (currentCorrelation === 'off' || selectedCoins.length !== 2) {
+                document.getElementById('scatterContainer').classList.remove('visible');
+                document.getElementById('correlationInfo').style.display = 'none';
+            }
         }
 
         function renderTable() {
@@ -340,28 +763,12 @@
             marketCapData.sort((a, b) => {
                 let aVal, bVal;
                 switch(column) {
-                    case 0: // Rank
-                        aVal = a.rank;
-                        bVal = b.rank;
-                        break;
-                    case 1: // Coin
-                        aVal = a.symbol;
-                        bVal = b.symbol;
-                        break;
-                    case 2: // Market Cap
-                        aVal = a.marketCap;
-                        bVal = b.marketCap;
-                        break;
-                    case 3: // Price
-                        aVal = a.price;
-                        bVal = b.price;
-                        break;
-                    case 4: // 24h Change
-                        aVal = a.change24h;
-                        bVal = b.change24h;
-                        break;
-                    default:
-                        return 0;
+                    case 0: aVal = a.rank; bVal = b.rank; break;
+                    case 1: aVal = a.symbol; bVal = b.symbol; break;
+                    case 2: aVal = a.marketCap; bVal = b.marketCap; break;
+                    case 3: aVal = a.price; bVal = b.price; break;
+                    case 4: aVal = a.change24h; bVal = b.change24h; break;
+                    default: return 0;
                 }
                 
                 if (typeof aVal === 'string') {
@@ -371,14 +778,12 @@
                 }
             });
             
-            // Update ranks after sorting
             marketCapData.forEach((item, index) => {
                 item.rank = index + 1;
             });
             
             renderTable();
             
-            // Update sort indicators
             document.querySelectorAll('.sort-indicator').forEach((ind, idx) => {
                 if (idx === column) {
                     ind.textContent = sortDirection === 1 ? '↑' : '↓';
@@ -386,78 +791,6 @@
                     ind.textContent = '↕';
                 }
             });
-        }
-
-        function renderCharts(btcHistory, ethHistory) {
-            console.log('Rendering charts...');
-            console.log('BTC History:', btcHistory);
-            console.log('ETH History:', ethHistory);
-            
-            const traces = [];
-            
-            if (btcHistory && btcHistory.dates && btcHistory.dates.length > 0) {
-                console.log(`Adding BTC trace with ${btcHistory.dates.length} points`);
-                traces.push({
-                    x: btcHistory.dates,
-                    y: btcHistory.values,
-                    mode: 'lines',
-                    name: 'BTC',
-                    line: { width: 3, color: '#f7931a' }
-                });
-            } else {
-                console.warn('BTC history is missing or empty');
-            }
-            
-            if (ethHistory && ethHistory.dates && ethHistory.dates.length > 0) {
-                console.log(`Adding ETH trace with ${ethHistory.dates.length} points`);
-                traces.push({
-                    x: ethHistory.dates,
-                    y: ethHistory.values,
-                    mode: 'lines',
-                    name: 'ETH',
-                    line: { width: 3, color: '#627eea' }
-                });
-            } else {
-                console.warn('ETH history is missing or empty');
-            }
-            
-            if (traces.length === 0) {
-                console.error('No traces to plot!');
-                document.getElementById('chart-btc-eth').innerHTML = 
-                    '<p style="text-align: center; padding: 40px; color: #666;">Unable to load chart data. Please check browser console for errors.</p>';
-                return;
-            }
-            
-            const layout = {
-                title: 'BTC vs ETH - Normalized Market Cap (Indexed to 100)',
-                xaxis: { title: 'Date' },
-                yaxis: { title: 'Index (100 = first value)' },
-                hovermode: 'closest',
-                height: 600,
-                template: 'plotly_white',
-                legend: { x: 0.02, y: 0.98 }
-            };
-            
-            console.log('Plotting with', traces.length, 'traces');
-            console.log('Trace data sample:', traces[0] ? { 
-                name: traces[0].name, 
-                xLength: traces[0].x.length, 
-                yLength: traces[0].y.length,
-                firstX: traces[0].x[0],
-                firstY: traces[0].y[0]
-            } : 'No traces');
-            
-            try {
-                Plotly.newPlot('chart-btc-eth', traces, layout, { responsive: true });
-                console.log('Chart rendered successfully');
-            } catch (plotError) {
-                console.error('Plotly error:', plotError);
-                document.getElementById('chart-btc-eth').innerHTML = 
-                    `<p style="text-align: center; padding: 40px; color: #dc3545;">
-                        Error rendering chart: ${plotError.message}<br>
-                        Check browser console for details.
-                    </p>`;
-            }
         }
 
         function formatNumber(num) {
@@ -473,4 +806,3 @@
     </script>
 </body>
 </html>
-
