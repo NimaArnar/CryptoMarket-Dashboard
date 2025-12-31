@@ -283,15 +283,20 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             price_text += f"📂 Category: {cat}\n"
         
         # Delete loading message and send result
-        await loading_msg.delete()
+        if loading_msg:
+            try:
+                await loading_msg.delete()
+            except:
+                pass
         await update.message.reply_text(price_text, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error getting price for {symbol}: {e}")
-        try:
-            await loading_msg.delete()
-        except:
-            pass
+        if loading_msg:
+            try:
+                await loading_msg.delete()
+            except:
+                pass
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
@@ -302,6 +307,7 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     
     symbol = context.args[0].upper()
+    loading_msg = None
     
     try:
         loading_msg = await update.message.reply_text("🔄 Loading data...")
@@ -328,20 +334,26 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             cat, grp = dm.meta[symbol]
             mc_text += f"📂 Category: {cat}\n"
         
-        await loading_msg.delete()
+        if loading_msg:
+            try:
+                await loading_msg.delete()
+            except:
+                pass
         await update.message.reply_text(mc_text, parse_mode="Markdown")
             
     except Exception as e:
         logger.error(f"Error getting market cap for {symbol}: {e}")
-        try:
-            await loading_msg.delete()
-        except:
-            pass
+        if loading_msg:
+            try:
+                await loading_msg.delete()
+            except:
+                pass
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
 async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /coins command - list all available coins."""
+    loading_msg = None
     try:
         loading_msg = await update.message.reply_text("🔄 Loading data...")
         import asyncio
@@ -371,20 +383,26 @@ async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if len(coins_text) > 4000:
             coins_text = coins_text[:4000] + "\n... (truncated)"
         
-        await loading_msg.delete()
+        if loading_msg:
+            try:
+                await loading_msg.delete()
+            except:
+                pass
         await update.message.reply_text(coins_text, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error listing coins: {e}")
-        try:
-            await loading_msg.delete()
-        except:
-            pass
+        if loading_msg:
+            try:
+                await loading_msg.delete()
+            except:
+                pass
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
 async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /latest command - get latest prices for all coins."""
+    loading_msg = None
     try:
         loading_msg = await update.message.reply_text("🔄 Loading data...")
         import asyncio
@@ -432,15 +450,20 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if len(dm.symbols_all) > 10:
             latest_text += f"\n... and {len(dm.symbols_all) - 10} more coins"
         
-        await loading_msg.delete()
+        if loading_msg:
+            try:
+                await loading_msg.delete()
+            except:
+                pass
         await update.message.reply_text(latest_text, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error getting latest prices: {e}")
-        try:
-            await loading_msg.delete()
-        except:
-            pass
+        if loading_msg:
+            try:
+                await loading_msg.delete()
+            except:
+                pass
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
@@ -451,6 +474,7 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     
     symbol = context.args[0].upper()
+    loading_msg = None
     
     try:
         loading_msg = await update.message.reply_text("🔄 Loading data...")
@@ -492,15 +516,20 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         info_text += f"📅 First Date: {series.index[0].strftime('%Y-%m-%d')}\n"
         info_text += f"📅 Last Date: {series.index[-1].strftime('%Y-%m-%d')}\n"
         
-        await loading_msg.delete()
+        if loading_msg:
+            try:
+                await loading_msg.delete()
+            except:
+                pass
         await update.message.reply_text(info_text, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error getting info for {symbol}: {e}")
-        try:
-            await loading_msg.delete()
-        except:
-            pass
+        if loading_msg:
+            try:
+                await loading_msg.delete()
+            except:
+                pass
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
