@@ -214,6 +214,7 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     
     symbol = context.args[0].upper()
+    loading_msg = None
     
     try:
         dm = _load_data_manager()
