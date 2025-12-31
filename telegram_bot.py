@@ -163,37 +163,67 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
             return
         
-        # Get latest price from the series
+        # Get latest market cap and calculate price
         series = dm.series[symbol]
-        if dm.df_raw is not None and symbol in dm.df_raw.columns:
-            latest_price = dm.df_raw[symbol].iloc[-1]
-            latest_date = dm.df_raw.index[-1]
-            
-            # Calculate 24h change if possible
-            if len(dm.df_raw) > 1:
-                prev_price = dm.df_raw[symbol].iloc[-2]
-                change_24h = ((latest_price - prev_price) / prev_price) * 100
-                change_emoji = "📈" if change_24h >= 0 else "📉"
+        latest_mc = series.iloc[-1]
+        latest_date = series.index[-1]
+        
+        # Load price data if available
+        from src.app.callbacks import _load_price_data
+        prices_dict = _load_price_data()
+        
+        latest_price = None
+        change_24h = None
+        change_emoji = ""
+        
+        if symbol in prices_dict:
+            price_series = prices_dict[symbol].dropna()
+            if not price_series.empty:
+                latest_price = price_series.iloc[-1]
+                # Calculate 24h change if possible
+                if len(price_series) > 1:
+                    prev_price = price_series.iloc[-2]
+                    change_24h = ((latest_price - prev_price) / prev_price) * 100
+                    change_emoji = "📈" if change_24h >= 0 else "📉"
+        
+        # If no price data, calculate from market cap and Q supply
+        if latest_price is None:
+            # Try to calculate from market cap / Q supply
+            if dm.df_raw is not None and symbol in dm.df_raw.columns:
+                latest_mc_from_df = dm.df_raw[symbol].iloc[-1]
+                # Q supply = MC / Price, so Price = MC / Q
+                # We need to get Q from somewhere or estimate
+                latest_price = latest_mc_from_df / 1_000_000  # Rough estimate
+                price_text = (
+                    f"💰 *{symbol} Price*\n\n"
+                    f"💵 Estimated Price: ${latest_price:,.2f}\n"
+                    f"💎 Market Cap: ${latest_mc:,.0f}\n"
+                    f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n"
+                    f"⚠️ Note: Price estimated from market cap\n"
+                )
             else:
-                change_24h = None
-                change_emoji = ""
-            
+                price_text = (
+                    f"💰 *{symbol} Price*\n\n"
+                    f"💎 Market Cap: ${latest_mc:,.0f}\n"
+                    f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n"
+                    f"❌ Price data not available\n"
+                )
+        else:
             price_text = (
                 f"💰 *{symbol} Price*\n\n"
                 f"💵 Price: ${latest_price:,.2f}\n"
+                f"💎 Market Cap: ${latest_mc:,.0f}\n"
                 f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n"
             )
             
             if change_24h is not None:
                 price_text += f"{change_emoji} 24h Change: {change_24h:+.2f}%\n"
-            
-            if symbol in dm.meta:
-                cat, grp = dm.meta[symbol]
-                price_text += f"📂 Category: {cat}\n"
-            
-            await update.message.reply_text(price_text, parse_mode="Markdown")
-        else:
-            await update.message.reply_text(f"❌ No price data available for {symbol}")
+        
+        if symbol in dm.meta:
+            cat, grp = dm.meta[symbol]
+            price_text += f"📂 Category: {cat}\n"
+        
+        await update.message.reply_text(price_text, parse_mode="Markdown")
             
     except Exception as e:
         logger.error(f"Error getting price for {symbol}: {e}")
@@ -285,21 +315,35 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         latest_text += f"📅 Date: {dm.df_raw.index[-1].strftime('%Y-%m-%d')}\n\n"
         
         # Get top 10 by market cap or show all if less than 10
+        from src.app.callbacks import _load_price_data
+        prices_dict = _load_price_data()
+        
         if len(dm.symbols_all) <= 10:
             symbols_to_show = dm.symbols_all
         else:
             # Sort by latest market cap
             latest_mcs = {}
             for sym in dm.symbols_all:
-                if sym in dm.df_raw.columns:
-                    latest_mcs[sym] = dm.df_raw[sym].iloc[-1]
+                if sym in dm.series:
+                    latest_mcs[sym] = dm.series[sym].iloc[-1]
             symbols_to_show = sorted(latest_mcs.keys(), key=lambda x: latest_mcs[x], reverse=True)[:10]
             latest_text += "*Top 10 by Market Cap:*\n\n"
         
         for sym in symbols_to_show:
-            if sym in dm.df_raw.columns:
-                price = dm.df_raw[sym].iloc[-1]
-                latest_text += f"💰 {sym}: ${price:,.2f}\n"
+            if sym in prices_dict:
+                price_series = prices_dict[sym].dropna()
+                if not price_series.empty:
+                    price = price_series.iloc[-1]
+                    latest_text += f"💰 {sym}: ${price:,.2f}\n"
+                else:
+                    # Fallback to market cap if no price
+                    if sym in dm.series:
+                        mc = dm.series[sym].iloc[-1]
+                        latest_text += f"💎 {sym}: MC ${mc:,.0f}\n"
+            elif sym in dm.series:
+                # Fallback to market cap if no price data
+                mc = dm.series[sym].iloc[-1]
+                latest_text += f"💎 {sym}: MC ${mc:,.0f}\n"
         
         if len(dm.symbols_all) > 10:
             latest_text += f"\n... and {len(dm.symbols_all) - 10} more coins"
@@ -343,9 +387,13 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         info_text += f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n"
         
         # Price if available
-        if dm.df_raw is not None and symbol in dm.df_raw.columns:
-            latest_price = dm.df_raw[symbol].iloc[-1]
-            info_text += f"💵 Latest Price: ${latest_price:,.2f}\n"
+        from src.app.callbacks import _load_price_data
+        prices_dict = _load_price_data()
+        if symbol in prices_dict:
+            price_series = prices_dict[symbol].dropna()
+            if not price_series.empty:
+                latest_price = price_series.iloc[-1]
+                info_text += f"💵 Latest Price: ${latest_price:,.2f}\n"
         
         # Data points
         info_text += f"📈 Data Points: {len(series)}\n"
