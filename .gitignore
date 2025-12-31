@@ -49,6 +49,10 @@ Thumbs.db
 
 # Environment variables
 .env
+*.env
+
+# Telegram bot token (never commit!)
+TELEGRAM_BOT_TOKEN
 .env.local
 
 # Jupyter Notebook
