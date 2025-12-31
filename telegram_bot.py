@@ -105,19 +105,60 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """Handle /stop command - stop the dashboard."""
     global dashboard_process
     
-    if not dashboard_process or dashboard_process.poll() is not None:
+    # Check if dashboard is running (either by bot or manually)
+    dashboard_running = False
+    
+    # Check if our tracked process is running
+    if dashboard_process and dashboard_process.poll() is None:
+        dashboard_running = True
+    
+    # Also check if dashboard is running on the port (even if not started by bot)
+    if not dashboard_running:
+        import socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('127.0.0.1', DASH_PORT))
+            dashboard_running = (result == 0)
+            sock.close()
+        except:
+            pass
+    
+    # Check for main.py processes
+    if not dashboard_running:
+        import psutil
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    cmdline = proc.info.get('cmdline', [])
+                    if cmdline and 'main.py' in ' '.join(cmdline):
+                        dashboard_running = True
+                        # Try to terminate this process
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=10)
+                        except psutil.TimeoutExpired:
+                            proc.kill()
+                        break
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except:
+            pass
+    
+    if not dashboard_running:
         await update.message.reply_text("⚠️ Dashboard is not running!")
         return
     
+    # Stop the tracked process if it exists
     try:
-        dashboard_process.terminate()
-        dashboard_process.wait(timeout=10)
+        if dashboard_process and dashboard_process.poll() is None:
+            dashboard_process.terminate()
+            try:
+                dashboard_process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                dashboard_process.kill()
         dashboard_process = None
         await update.message.reply_text("🛑 Dashboard stopped successfully!")
-    except subprocess.TimeoutExpired:
-        dashboard_process.kill()
-        dashboard_process = None
-        await update.message.reply_text("🛑 Dashboard force stopped!")
     except Exception as e:
         logger.error(f"Error stopping dashboard: {e}")
         await update.message.reply_text(f"❌ Error: {str(e)}")
