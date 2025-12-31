@@ -106,9 +106,14 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     global dashboard_process
     
     stopped_any = False
+    tracked_pid = None
+    
+    # Get the tracked process PID before stopping it
+    if dashboard_process and dashboard_process.poll() is None:
+        tracked_pid = dashboard_process.pid
     
     # Stop the tracked process if it exists
-    if dashboard_process and dashboard_process.poll() is None:
+    if tracked_pid:
         try:
             dashboard_process.terminate()
             try:
@@ -128,17 +133,19 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             try:
                 cmdline = proc.info.get('cmdline', [])
                 if cmdline and 'main.py' in ' '.join(cmdline):
+                    proc_pid = proc.info['pid']
                     # Skip if this is the bot's tracked process (already handled above)
-                    if not dashboard_process or proc.info['pid'] != dashboard_process.pid:
+                    if tracked_pid and proc_pid == tracked_pid:
+                        continue
+                    try:
+                        proc.terminate()
                         try:
-                            proc.terminate()
-                            try:
-                                proc.wait(timeout=10)
-                            except psutil.TimeoutExpired:
-                                proc.kill()
-                            stopped_any = True
-                        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                            logger.warning(f"Could not stop process {proc.info['pid']}: {e}")
+                            proc.wait(timeout=10)
+                        except psutil.TimeoutExpired:
+                            proc.kill()
+                        stopped_any = True
+                    except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                        logger.warning(f"Could not stop process {proc_pid}: {e}")
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
     except Exception as e:
@@ -188,17 +195,20 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except:
         pass
     
-    # Check for main.py processes - collect all PIDs
+    # Check for main.py processes - collect all PIDs (excluding bot's tracked process)
     import psutil
     main_py_pids = []
+    tracked_pid = dashboard_process.pid if bot_started else None
     try:
         for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
             try:
                 cmdline = proc.info.get('cmdline', [])
                 if cmdline and 'main.py' in ' '.join(cmdline):
+                    proc_pid = proc.info['pid']
                     # Skip if this is the bot's tracked process
-                    if not bot_started or proc.info['pid'] != dashboard_process.pid:
-                        main_py_pids.append(proc.info['pid'])
+                    if tracked_pid and proc_pid == tracked_pid:
+                        continue
+                    main_py_pids.append(proc_pid)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
     except:
@@ -213,6 +223,12 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if bot_started:
             status_text += f"📊 Process ID: {dashboard_process.pid}\n"
             status_text += "🤖 Started by bot"
+            # Also show manually started processes if any
+            if main_py_pids:
+                if len(main_py_pids) == 1:
+                    status_text += f"\n⚠️ Also running (manual): PID {main_py_pids[0]}"
+                else:
+                    status_text += f"\n⚠️ Also running (manual): PIDs {', '.join(map(str, main_py_pids))}"
         elif main_py_pids:
             # Show all PIDs if multiple, or just one
             if len(main_py_pids) == 1:
