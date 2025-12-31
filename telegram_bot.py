@@ -9,6 +9,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from src.config import DASH_PORT
+from src.data_manager import DataManager
 from src.utils import setup_logger
 
 logger = setup_logger(__name__)
@@ -16,6 +17,7 @@ logger = setup_logger(__name__)
 # Global variable to track if dashboard is running
 dashboard_process: Optional[subprocess.Popen] = None
 dashboard_thread: Optional[threading.Thread] = None
+data_manager: Optional[DataManager] = None
 
 # Telegram Bot Token (set via environment variable)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -25,12 +27,17 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     """Handle /start command."""
     welcome_message = (
         "🤖 *Crypto Market Dashboard Bot*\n\n"
-        "Available commands:\n"
-        "/start - Show this message\n"
+        "📊 *Dashboard Control:*\n"
         "/run - Start the dashboard\n"
         "/stop - Stop the dashboard\n"
-        "/status - Check dashboard status\n"
-        "/help - Show help message"
+        "/status - Check dashboard status\n\n"
+        "💰 *Data Queries:*\n"
+        "/price BTC - Get latest price\n"
+        "/marketcap ETH - Get market cap\n"
+        "/coins - List all available coins\n"
+        "/latest - Latest prices for all coins\n"
+        "/info BTC - Detailed coin information\n\n"
+        "/help - Show detailed help"
     )
     await update.message.reply_text(welcome_message, parse_mode="Markdown")
 
@@ -38,12 +45,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /help command."""
     help_text = (
-        "📚 *Help*\n\n"
+        "📚 *Help - Crypto Market Dashboard Bot*\n\n"
+        "📊 *Dashboard Control:*\n"
         "*/run* - Start the dashboard server\n"
         "*/stop* - Stop the dashboard server\n"
-        "*/status* - Check if dashboard is running\n"
-        "*/start* - Show welcome message\n\n"
-        f"Dashboard runs on: http://127.0.0.1:{DASH_PORT}/"
+        "*/status* - Check if dashboard is running\n\n"
+        "💰 *Data Queries:*\n"
+        "*/price <SYMBOL>* - Get latest price (e.g., /price BTC)\n"
+        "*/marketcap <SYMBOL>* - Get market cap (e.g., /marketcap ETH)\n"
+        "*/coins* - List all available coins\n"
+        "*/latest* - Latest prices for all coins\n"
+        "*/info <SYMBOL>* - Detailed coin information\n\n"
+        f"🌐 Dashboard: http://127.0.0.1:{DASH_PORT}/"
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
 
@@ -126,6 +139,226 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text(status_text, parse_mode="Markdown")
 
 
+def _load_data_manager() -> DataManager:
+    """Load data manager (lazy loading)."""
+    global data_manager
+    if data_manager is None:
+        data_manager = DataManager()
+        data_manager.load_all_data()
+    return data_manager
+
+
+async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /price command - get latest price for a coin."""
+    if not context.args:
+        await update.message.reply_text("❌ Please specify a coin symbol. Example: /price BTC")
+        return
+    
+    symbol = context.args[0].upper()
+    
+    try:
+        dm = _load_data_manager()
+        
+        if symbol not in dm.series:
+            await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
+            return
+        
+        # Get latest price from the series
+        series = dm.series[symbol]
+        if dm.df_raw is not None and symbol in dm.df_raw.columns:
+            latest_price = dm.df_raw[symbol].iloc[-1]
+            latest_date = dm.df_raw.index[-1]
+            
+            # Calculate 24h change if possible
+            if len(dm.df_raw) > 1:
+                prev_price = dm.df_raw[symbol].iloc[-2]
+                change_24h = ((latest_price - prev_price) / prev_price) * 100
+                change_emoji = "📈" if change_24h >= 0 else "📉"
+            else:
+                change_24h = None
+                change_emoji = ""
+            
+            price_text = (
+                f"💰 *{symbol} Price*\n\n"
+                f"💵 Price: ${latest_price:,.2f}\n"
+                f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n"
+            )
+            
+            if change_24h is not None:
+                price_text += f"{change_emoji} 24h Change: {change_24h:+.2f}%\n"
+            
+            if symbol in dm.meta:
+                cat, grp = dm.meta[symbol]
+                price_text += f"📂 Category: {cat}\n"
+            
+            await update.message.reply_text(price_text, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(f"❌ No price data available for {symbol}")
+            
+    except Exception as e:
+        logger.error(f"Error getting price for {symbol}: {e}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
+async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /marketcap command - get market cap for a coin."""
+    if not context.args:
+        await update.message.reply_text("❌ Please specify a coin symbol. Example: /marketcap BTC")
+        return
+    
+    symbol = context.args[0].upper()
+    
+    try:
+        dm = _load_data_manager()
+        
+        if symbol not in dm.series:
+            await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
+            return
+        
+        # Market cap is stored in the series
+        series = dm.series[symbol]
+        latest_mc = series.iloc[-1]
+        latest_date = series.index[-1]
+        
+        mc_text = (
+            f"💎 *{symbol} Market Cap*\n\n"
+            f"💰 Market Cap: ${latest_mc:,.0f}\n"
+            f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n"
+        )
+        
+        if symbol in dm.meta:
+            cat, grp = dm.meta[symbol]
+            mc_text += f"📂 Category: {cat}\n"
+        
+        await update.message.reply_text(mc_text, parse_mode="Markdown")
+            
+    except Exception as e:
+        logger.error(f"Error getting market cap for {symbol}: {e}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
+async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /coins command - list all available coins."""
+    try:
+        dm = _load_data_manager()
+        
+        if not dm.symbols_all:
+            await update.message.reply_text("❌ No coins loaded. Try running the dashboard first.")
+            return
+        
+        coins_text = f"📋 *Available Coins ({len(dm.symbols_all)})*\n\n"
+        
+        # Group by category
+        by_category = {}
+        for sym in dm.symbols_all:
+            if sym in dm.meta:
+                cat, _ = dm.meta[sym]
+                if cat not in by_category:
+                    by_category[cat] = []
+                by_category[cat].append(sym)
+        
+        for cat, symbols in sorted(by_category.items()):
+            coins_text += f"*{cat}:*\n"
+            coins_text += ", ".join(symbols) + "\n\n"
+        
+        # Split if too long (Telegram has 4096 char limit)
+        if len(coins_text) > 4000:
+            coins_text = coins_text[:4000] + "\n... (truncated)"
+        
+        await update.message.reply_text(coins_text, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"Error listing coins: {e}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
+async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /latest command - get latest prices for all coins."""
+    try:
+        dm = _load_data_manager()
+        
+        if dm.df_raw is None or dm.df_raw.empty:
+            await update.message.reply_text("❌ No data available. Try running the dashboard first.")
+            return
+        
+        latest_text = f"📊 *Latest Prices*\n"
+        latest_text += f"📅 Date: {dm.df_raw.index[-1].strftime('%Y-%m-%d')}\n\n"
+        
+        # Get top 10 by market cap or show all if less than 10
+        if len(dm.symbols_all) <= 10:
+            symbols_to_show = dm.symbols_all
+        else:
+            # Sort by latest market cap
+            latest_mcs = {}
+            for sym in dm.symbols_all:
+                if sym in dm.df_raw.columns:
+                    latest_mcs[sym] = dm.df_raw[sym].iloc[-1]
+            symbols_to_show = sorted(latest_mcs.keys(), key=lambda x: latest_mcs[x], reverse=True)[:10]
+            latest_text += "*Top 10 by Market Cap:*\n\n"
+        
+        for sym in symbols_to_show:
+            if sym in dm.df_raw.columns:
+                price = dm.df_raw[sym].iloc[-1]
+                latest_text += f"💰 {sym}: ${price:,.2f}\n"
+        
+        if len(dm.symbols_all) > 10:
+            latest_text += f"\n... and {len(dm.symbols_all) - 10} more coins"
+        
+        await update.message.reply_text(latest_text, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"Error getting latest prices: {e}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
+async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /info command - get detailed information for a coin."""
+    if not context.args:
+        await update.message.reply_text("❌ Please specify a coin symbol. Example: /info BTC")
+        return
+    
+    symbol = context.args[0].upper()
+    
+    try:
+        dm = _load_data_manager()
+        
+        if symbol not in dm.series:
+            await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
+            return
+        
+        info_text = f"📊 *{symbol} Information*\n\n"
+        
+        # Category and group
+        if symbol in dm.meta:
+            cat, grp = dm.meta[symbol]
+            info_text += f"📂 Category: {cat}\n"
+            info_text += f"🏷️ Group: {grp}\n\n"
+        
+        # Latest data
+        series = dm.series[symbol]
+        latest_mc = series.iloc[-1]
+        latest_date = series.index[-1]
+        
+        info_text += f"💎 Latest Market Cap: ${latest_mc:,.0f}\n"
+        info_text += f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n"
+        
+        # Price if available
+        if dm.df_raw is not None and symbol in dm.df_raw.columns:
+            latest_price = dm.df_raw[symbol].iloc[-1]
+            info_text += f"💵 Latest Price: ${latest_price:,.2f}\n"
+        
+        # Data points
+        info_text += f"📈 Data Points: {len(series)}\n"
+        info_text += f"📅 First Date: {series.index[0].strftime('%Y-%m-%d')}\n"
+        info_text += f"📅 Last Date: {series.index[-1].strftime('%Y-%m-%d')}\n"
+        
+        await update.message.reply_text(info_text, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"Error getting info for {symbol}: {e}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
 def main() -> None:
     """Start the Telegram bot."""
     if not TELEGRAM_BOT_TOKEN:
@@ -142,6 +375,13 @@ def main() -> None:
     application.add_handler(CommandHandler("run", run_command))
     application.add_handler(CommandHandler("stop", stop_command))
     application.add_handler(CommandHandler("status", status_command))
+    
+    # Data query handlers
+    application.add_handler(CommandHandler("price", price_command))
+    application.add_handler(CommandHandler("marketcap", marketcap_command))
+    application.add_handler(CommandHandler("coins", coins_command))
+    application.add_handler(CommandHandler("latest", latest_command))
+    application.add_handler(CommandHandler("info", info_command))
     
     # Start the bot
     logger.info("Starting Telegram bot...")
