@@ -217,7 +217,10 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     loading_msg = None
     
     try:
-        dm = _load_data_manager()
+        # Load data in executor to avoid blocking
+        import asyncio
+        loop = asyncio.get_event_loop()
+        dm = await loop.run_in_executor(None, _load_data_manager)
         
         if symbol not in dm.series:
             await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
