@@ -143,9 +143,22 @@ def _load_data_manager() -> DataManager:
     """Load data manager (lazy loading)."""
     global data_manager
     if data_manager is None:
-        data_manager = DataManager()
-        data_manager.load_all_data()
+        # Run data loading in executor to avoid event loop conflicts
+        import asyncio
+        import concurrent.futures
+        
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(_load_data_sync)
+            data_manager = future.result()
     return data_manager
+
+
+def _load_data_sync() -> DataManager:
+    """Load data synchronously (run in thread to avoid event loop issues)."""
+    dm = DataManager()
+    dm.load_all_data()
+    return dm
 
 
 async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -223,10 +236,16 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             cat, grp = dm.meta[symbol]
             price_text += f"📂 Category: {cat}\n"
         
+        # Delete loading message and send result
+        await loading_msg.delete()
         await update.message.reply_text(price_text, parse_mode="Markdown")
-            
+        
     except Exception as e:
         logger.error(f"Error getting price for {symbol}: {e}")
+        try:
+            await loading_msg.delete()
+        except:
+            pass
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
@@ -239,7 +258,10 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     symbol = context.args[0].upper()
     
     try:
-        dm = _load_data_manager()
+        loading_msg = await update.message.reply_text("🔄 Loading data...")
+        import asyncio
+        loop = asyncio.get_event_loop()
+        dm = await loop.run_in_executor(None, _load_data_manager)
         
         if symbol not in dm.series:
             await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
@@ -260,17 +282,25 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             cat, grp = dm.meta[symbol]
             mc_text += f"📂 Category: {cat}\n"
         
+        await loading_msg.delete()
         await update.message.reply_text(mc_text, parse_mode="Markdown")
             
     except Exception as e:
         logger.error(f"Error getting market cap for {symbol}: {e}")
+        try:
+            await loading_msg.delete()
+        except:
+            pass
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
 async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /coins command - list all available coins."""
     try:
-        dm = _load_data_manager()
+        loading_msg = await update.message.reply_text("🔄 Loading data...")
+        import asyncio
+        loop = asyncio.get_event_loop()
+        dm = await loop.run_in_executor(None, _load_data_manager)
         
         if not dm.symbols_all:
             await update.message.reply_text("❌ No coins loaded. Try running the dashboard first.")
@@ -295,17 +325,25 @@ async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if len(coins_text) > 4000:
             coins_text = coins_text[:4000] + "\n... (truncated)"
         
+        await loading_msg.delete()
         await update.message.reply_text(coins_text, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error listing coins: {e}")
+        try:
+            await loading_msg.delete()
+        except:
+            pass
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
 async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /latest command - get latest prices for all coins."""
     try:
-        dm = _load_data_manager()
+        loading_msg = await update.message.reply_text("🔄 Loading data...")
+        import asyncio
+        loop = asyncio.get_event_loop()
+        dm = await loop.run_in_executor(None, _load_data_manager)
         
         if dm.df_raw is None or dm.df_raw.empty:
             await update.message.reply_text("❌ No data available. Try running the dashboard first.")
@@ -348,10 +386,15 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if len(dm.symbols_all) > 10:
             latest_text += f"\n... and {len(dm.symbols_all) - 10} more coins"
         
+        await loading_msg.delete()
         await update.message.reply_text(latest_text, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error getting latest prices: {e}")
+        try:
+            await loading_msg.delete()
+        except:
+            pass
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
@@ -364,7 +407,10 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     symbol = context.args[0].upper()
     
     try:
-        dm = _load_data_manager()
+        loading_msg = await update.message.reply_text("🔄 Loading data...")
+        import asyncio
+        loop = asyncio.get_event_loop()
+        dm = await loop.run_in_executor(None, _load_data_manager)
         
         if symbol not in dm.series:
             await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
@@ -400,10 +446,15 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         info_text += f"📅 First Date: {series.index[0].strftime('%Y-%m-%d')}\n"
         info_text += f"📅 Last Date: {series.index[-1].strftime('%Y-%m-%d')}\n"
         
+        await loading_msg.delete()
         await update.message.reply_text(info_text, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error getting info for {symbol}: {e}")
+        try:
+            await loading_msg.delete()
+        except:
+            pass
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
