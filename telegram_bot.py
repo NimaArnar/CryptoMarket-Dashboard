@@ -183,18 +183,17 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except:
         pass
     
-    # Check for main.py processes
+    # Check for main.py processes - collect all PIDs
     import psutil
-    main_py_running = False
-    main_py_pid = None
+    main_py_pids = []
     try:
         for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
             try:
                 cmdline = proc.info.get('cmdline', [])
                 if cmdline and 'main.py' in ' '.join(cmdline):
-                    main_py_running = True
-                    main_py_pid = proc.info['pid']
-                    break
+                    # Skip if this is the bot's tracked process
+                    if not bot_started or proc.info['pid'] != dashboard_process.pid:
+                        main_py_pids.append(proc.info['pid'])
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
     except:
@@ -202,15 +201,19 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         pass
     
     # Build status message (only one message)
-    if bot_started or port_in_use or main_py_running:
+    if bot_started or port_in_use or main_py_pids:
         status_text = "✅ *Dashboard Status: RUNNING*\n\n"
         status_text += f"🌐 URL: http://127.0.0.1:{DASH_PORT}/\n"
         
         if bot_started:
             status_text += f"📊 Process ID: {dashboard_process.pid}\n"
             status_text += "🤖 Started by bot"
-        elif main_py_pid:
-            status_text += f"📊 Process ID: {main_py_pid}\n"
+        elif main_py_pids:
+            # Show all PIDs if multiple, or just one
+            if len(main_py_pids) == 1:
+                status_text += f"📊 Process ID: {main_py_pids[0]}\n"
+            else:
+                status_text += f"📊 Process IDs: {', '.join(map(str, main_py_pids))}\n"
             status_text += "⚠️ Started manually (not by bot)"
         elif port_in_use:
             status_text += "⚠️ Port in use (process may be running)\n"
