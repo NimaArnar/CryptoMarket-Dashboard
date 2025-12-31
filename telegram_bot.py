@@ -160,6 +160,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # psutil not available, skip this check
         pass
     
+    # Build status message (only one message)
     if bot_started or port_in_use or main_py_running:
         status_text = "✅ *Dashboard Status: RUNNING*\n\n"
         status_text += f"🌐 URL: http://127.0.0.1:{DASH_PORT}/\n"
@@ -180,6 +181,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"🌐 Will run on: http://127.0.0.1:{DASH_PORT}/"
         )
     
+    # Send only one message
     await update.message.reply_text(status_text, parse_mode="Markdown")
 
 
