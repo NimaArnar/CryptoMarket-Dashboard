@@ -127,14 +127,58 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Handle /status command - check dashboard status."""
     global dashboard_process
     
-    if dashboard_process and dashboard_process.poll() is None:
-        status_text = (
-            "✅ *Dashboard Status: RUNNING*\n\n"
-            f"🌐 URL: http://127.0.0.1:{DASH_PORT}/\n"
-            f"📊 Process ID: {dashboard_process.pid}"
-        )
+    # Check if our tracked process is running
+    bot_started = dashboard_process and dashboard_process.poll() is None
+    
+    # Also check if dashboard is running on the port (even if not started by bot)
+    import socket
+    port_in_use = False
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex(('127.0.0.1', DASH_PORT))
+        port_in_use = (result == 0)
+        sock.close()
+    except:
+        pass
+    
+    # Check for main.py processes
+    import psutil
+    main_py_running = False
+    main_py_pid = None
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                cmdline = proc.info.get('cmdline', [])
+                if cmdline and 'main.py' in ' '.join(cmdline):
+                    main_py_running = True
+                    main_py_pid = proc.info['pid']
+                    break
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except:
+        # psutil not available, skip this check
+        pass
+    
+    if bot_started or port_in_use or main_py_running:
+        status_text = "✅ *Dashboard Status: RUNNING*\n\n"
+        status_text += f"🌐 URL: http://127.0.0.1:{DASH_PORT}/\n"
+        
+        if bot_started:
+            status_text += f"📊 Process ID: {dashboard_process.pid}\n"
+            status_text += "🤖 Started by bot"
+        elif main_py_pid:
+            status_text += f"📊 Process ID: {main_py_pid}\n"
+            status_text += "⚠️ Started manually (not by bot)"
+        elif port_in_use:
+            status_text += "⚠️ Port in use (process may be running)\n"
+            status_text += "💡 Use /run to start via bot"
     else:
-        status_text = "❌ *Dashboard Status: STOPPED*"
+        status_text = (
+            "❌ *Dashboard Status: STOPPED*\n\n"
+            f"💡 Use /run to start the dashboard\n"
+            f"🌐 Will run on: http://127.0.0.1:{DASH_PORT}/"
+        )
     
     await update.message.reply_text(status_text, parse_mode="Markdown")
 
