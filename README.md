@@ -85,7 +85,7 @@ python main.py
 |----------|---------|-------------|
 | `COINGECKO_API_KEY` | None | CoinGecko Pro API key (optional) |
 | `USE_ASYNC_FETCH` | "true" | Enable async parallel fetching |
-| `MAX_CONCURRENT_REQUESTS` | "5" | Max concurrent API requests |
+| `MAX_CONCURRENT_REQUESTS` | "10" (free) / "30" (Pro) | Max concurrent API requests - automatically set to 30 if Pro API key is provided, 10 for free API |
 | `MIN_CORR_DAYS` | "10" | Minimum overlapping days for correlation |
 
 ### Custom Async Configuration
@@ -94,8 +94,10 @@ python main.py
 # Disable async (use sequential fetching)
 $env:USE_ASYNC_FETCH="false"
 
-# Increase concurrent requests (if you have Pro API)
-$env:MAX_CONCURRENT_REQUESTS="10"
+# Increase concurrent requests (if you have Pro API or want to test higher limits)
+# Default is already 30 for Pro API, 10 for free API
+# Be careful: too high may hit rate limits
+$env:MAX_CONCURRENT_REQUESTS="30"
 
 python main.py
 ```

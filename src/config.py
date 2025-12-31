@@ -38,7 +38,12 @@ COINGECKO_API_BASE = "https://pro-api.coingecko.com/api/v3" if COINGECKO_API_KEY
 
 # Async Configuration
 USE_ASYNC = os.getenv("USE_ASYNC_FETCH", "true").lower() == "true"
-MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT_REQUESTS", "5"))
+# Default: 10 for free API, 30 for Pro API (can be overridden via env var)
+# Higher concurrency = faster fetching, but must respect rate limits
+# Pro API has higher rate limits, so we can use more concurrent requests
+_has_pro_api = COINGECKO_API_KEY is not None
+DEFAULT_MAX_CONCURRENT = 30 if _has_pro_api else 10
+MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT_REQUESTS", str(DEFAULT_MAX_CONCURRENT)))
 
 # Dash App Configuration
 DASH_PORT = int(os.getenv("PORT", "8052"))  # Use PORT env var for cloud deployment

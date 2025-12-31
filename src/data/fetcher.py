@@ -211,32 +211,54 @@ async def fetch_all_coins_async(coin_list: List[Tuple[str, str, str, str]]) -> D
         return series_dict
 
 
-def fetch_all_coins(coin_list: List[Tuple[str, str, str, str]], max_concurrent: int = 5) -> Dict[str, pd.Series]:
+def fetch_all_coins(coin_list: List[Tuple[str, str, str, str]], max_concurrent: int = 10) -> Dict[str, pd.Series]:
     """
     Fetch all coins, using async if available, otherwise sequential.
+    
+    Uses semaphore to control concurrency for better performance.
+    Higher concurrency = faster fetching, but must respect rate limits.
     
     Args:
         coin_list: List of (coin_id, symbol, category, group) tuples
         max_concurrent: Maximum concurrent requests (for async mode)
+                      - Default: 10 for free API, 30 for Pro API
+                      - Can be increased if you have Pro API with higher limits
     
     Returns:
         Dictionary mapping symbols to market cap Series
     """
     if USE_ASYNC and HAS_AIOHTTP:
-        # Process in batches to respect rate limits
-        coin_batches = [coin_list[i:i + max_concurrent] for i in range(0, len(coin_list), max_concurrent)]
-        all_results = {}
+        # Use semaphore to limit concurrent requests (better than batching)
+        semaphore = asyncio.Semaphore(max_concurrent)
         
-        for batch_idx, batch in enumerate(coin_batches):
-            logger.info(f"Fetching batch {batch_idx + 1}/{len(coin_batches)} ({len(batch)} coins)")
-            batch_results = asyncio.run(fetch_all_coins_async(batch))
-            all_results.update(batch_results)
-            
-            # Small delay between batches to avoid rate limits
-            if batch_idx < len(coin_batches) - 1:
-                time.sleep(BASE_SLEEP * 2)
+        async def fetch_with_semaphore(session, coin_id):
+            """Fetch with semaphore to limit concurrent requests."""
+            async with semaphore:
+                return await fetch_market_caps_async(session, coin_id)
         
-        return all_results
+        async def fetch_all_with_limit():
+            """Fetch all coins with controlled concurrency."""
+            async with aiohttp.ClientSession() as session:
+                tasks = [fetch_with_semaphore(session, coin_id) for coin_id, _, _, _ in coin_list]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                series_dict = {}
+                for idx, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        coin_id = coin_list[idx][0]
+                        logger.error(f"Async fetch failed for {coin_id}: {result}")
+                        continue
+                    coin_id, series_data = result
+                    # Find symbol for this coin_id
+                    for cid, sym, _, _ in coin_list:
+                        if cid == coin_id:
+                            series_dict[sym] = series_data
+                            break
+                
+                return series_dict
+        
+        logger.info(f"Fetching {len(coin_list)} coins with max {max_concurrent} concurrent requests")
+        return asyncio.run(fetch_all_with_limit())
     else:
         # Sequential fetching
         series_dict = {}
