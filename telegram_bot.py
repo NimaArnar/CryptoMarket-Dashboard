@@ -11,7 +11,7 @@ from typing import Optional
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
-from telegram.error import Conflict
+from telegram.error import Conflict, TimedOut, NetworkError
 
 from src.config import DASH_PORT, PROJECT_ROOT
 from src.data_manager import DataManager
@@ -1533,16 +1533,27 @@ async def main_async() -> None:
     
     # Delete any existing webhook to ensure clean polling state
     from telegram import Bot
+    from telegram.error import TimedOut, NetworkError
     try:
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
-        webhook_info = await bot.get_webhook_info()
-        if webhook_info.url:
-            logger.info(f"Found existing webhook: {webhook_info.url}. Deleting it...")
-            await bot.delete_webhook(drop_pending_updates=True)
-            logger.info("Webhook deleted. Ready for polling.")
-        await bot.close()
+        # Add timeout for webhook check
+        try:
+            webhook_info = await asyncio.wait_for(bot.get_webhook_info(), timeout=10.0)
+            if webhook_info.url:
+                logger.info(f"Found existing webhook: {webhook_info.url}. Deleting it...")
+                await asyncio.wait_for(bot.delete_webhook(drop_pending_updates=True), timeout=10.0)
+                logger.info("Webhook deleted. Ready for polling.")
+        except (TimedOut, NetworkError, asyncio.TimeoutError) as e:
+            logger.warning(f"Network timeout checking webhook (this is OK): {e}")
+        except Exception as e:
+            logger.warning(f"Could not check/delete webhook: {e}. Continuing anyway...")
+        finally:
+            try:
+                await bot.close()
+            except:
+                pass
     except Exception as e:
-        logger.warning(f"Could not check/delete webhook: {e}. Continuing anyway...")
+        logger.warning(f"Could not initialize bot for webhook check: {e}. Continuing anyway...")
     
     # Create application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
@@ -1572,7 +1583,30 @@ async def main_async() -> None:
     logger.info("Starting Telegram bot...")
     try:
         async with application:
-            await application.start()
+            # Try to start with retry logic for network issues
+            max_retries = 3
+            retry_delay = 2
+            for attempt in range(max_retries):
+                try:
+                    await application.start()
+                    break
+                except (TimedOut, NetworkError) as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Connection timeout (attempt {attempt + 1}/{max_retries}). Retrying in {retry_delay} seconds...")
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                    else:
+                        logger.error(f"Failed to connect to Telegram API after {max_retries} attempts.")
+                        logger.error("This is usually a network connectivity issue.")
+                        logger.error("Please check:")
+                        logger.error("  1. Your internet connection")
+                        logger.error("  2. Firewall/proxy settings")
+                        logger.error("  3. Telegram API status")
+                        raise
+                except Exception as e:
+                    logger.error(f"Error starting bot: {e}")
+                    raise
+            
             await application.updater.start_polling(
                 allowed_updates=Update.ALL_TYPES,
                 drop_pending_updates=True
