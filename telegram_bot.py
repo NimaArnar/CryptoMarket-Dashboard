@@ -19,6 +19,60 @@ from src.utils import setup_logger
 
 logger = setup_logger(__name__)
 
+# User action tracking logger
+from datetime import datetime
+from pathlib import Path
+import logging
+
+USER_LOG_DIR = PROJECT_ROOT / "logs"
+USER_LOG_DIR.mkdir(exist_ok=True)
+user_action_logger = logging.getLogger("user_actions")
+user_action_logger.setLevel(logging.INFO)
+
+# Avoid duplicate handlers
+if not user_action_logger.handlers:
+    user_log_file = USER_LOG_DIR / f"bot_users_{datetime.now().strftime('%Y%m%d')}.log"
+    user_file_handler = logging.FileHandler(user_log_file, encoding='utf-8')
+    user_file_handler.setLevel(logging.INFO)
+    user_formatter = logging.Formatter(
+        '%(asctime)s | %(message)s'
+    )
+    user_file_handler.setFormatter(user_formatter)
+    user_action_logger.addHandler(user_file_handler)
+    user_action_logger.propagate = False  # Don't propagate to root logger
+
+
+def log_user_action(update: Update, action_type: str, action_details: str = ""):
+    """
+    Log user actions for tracking.
+    
+    Args:
+        update: Telegram Update object
+        action_type: Type of action (command, button, etc.)
+        action_details: Additional details about the action
+    """
+    try:
+        user = update.effective_user
+        user_id = user.id if user else "unknown"
+        username = user.username if user and user.username else "no_username"
+        first_name = user.first_name if user and user.first_name else "unknown"
+        last_name = user.last_name if user and user.last_name else ""
+        full_name = f"{first_name} {last_name}".strip()
+        
+        # Format: UserID | Username | FullName | ActionType | Details
+        log_message = (
+            f"UserID:{user_id} | "
+            f"Username:@{username} | "
+            f"Name:{full_name} | "
+            f"Action:{action_type} | "
+            f"Details:{action_details}"
+        )
+        
+        user_action_logger.info(log_message)
+        logger.info(f"User action tracked: {action_type} by @{username} ({user_id})")
+    except Exception as e:
+        logger.warning(f"Failed to log user action: {e}")
+
 # Lock file for ensuring only one instance runs
 LOCK_FILE = PROJECT_ROOT / ".telegram_bot.lock"
 
@@ -136,6 +190,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     # Log button click for debugging
     logger.info(f"telegram_bot - Button clicked: {data}")
+    
+    # Track user action
+    log_user_action(update, "button_click", data)
     
     # Menu navigation - delete previous button message and send new one to avoid crowding
     chat_id = query.message.chat_id
@@ -289,6 +346,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.info(f"telegram_bot - /start command received. Creating keyboard with {len(keyboard.inline_keyboard)} rows")
     logger.info(f"telegram_bot - Keyboard buttons: {[row[0].text for row in keyboard.inline_keyboard]}")
     
+    # Track user action
+    log_user_action(update, "command", "/start")
+    
     try:
         await update.message.reply_text(
             welcome_message,
@@ -302,6 +362,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /help command."""
+    # Track user action
+    log_user_action(update, "command", "/help")
     """Handle /help command."""
     help_text = (
         "📚 *Help - Crypto Market Dashboard Bot*\n\n"
@@ -326,6 +389,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /run command - start the dashboard."""
+    # Track user action
+    log_user_action(update, "command", "/run")
+    
     global dashboard_process, dashboard_thread
     
     if dashboard_process and dashboard_process.poll() is None:
@@ -605,6 +671,9 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /stop command - stop the dashboard."""
+    # Track user action
+    log_user_action(update, "command", "/stop")
+    
     global dashboard_process
     
     stopped_any = False
@@ -683,6 +752,9 @@ _processed_updates = set()
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /status command - check dashboard status."""
+    # Track user action
+    log_user_action(update, "command", "/status")
+    
     global dashboard_process, _processed_updates
     
     # Prevent duplicate responses to the same update
@@ -894,6 +966,10 @@ def _check_dashboard_running() -> bool:
 
 async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /price command - get latest price for a coin."""
+    # Track user action
+    symbol = context.args[0].upper() if context.args and len(context.args) > 0 else "none"
+    log_user_action(update, "command", f"/price {symbol}")
+    
     if not context.args:
         await update.message.reply_text("❌ Please specify a coin symbol. Example: /price BTC")
         return
@@ -981,6 +1057,10 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /marketcap command - get market cap for a coin."""
+    # Track user action
+    symbol = context.args[0].upper() if context.args and len(context.args) > 0 else "none"
+    log_user_action(update, "command", f"/marketcap {symbol}")
+    
     if not context.args:
         await update.message.reply_text("❌ Please specify a coin symbol. Example: /marketcap BTC")
         return
@@ -1041,6 +1121,9 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /coins command - list all available coins."""
+    # Track user action
+    log_user_action(update, "command", "/coins")
+    
     # Get coins directly from constants (no need to load data)
     from src.constants import COINS, DOM_SYM
     
@@ -1068,6 +1151,9 @@ async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /latest command - get latest prices for all coins."""
+    # Track user action
+    log_user_action(update, "command", "/latest")
+    
     # Check if dashboard is running
     if not _check_dashboard_running():
         await update.message.reply_text(
@@ -1144,6 +1230,10 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /info command - get detailed information for a coin."""
+    # Track user action
+    symbol = context.args[0].upper() if context.args and len(context.args) > 0 else "none"
+    log_user_action(update, "command", f"/info {symbol}")
+    
     if not context.args:
         await update.message.reply_text("❌ Please specify a coin symbol. Example: /info BTC")
         return
@@ -1219,6 +1309,10 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle unknown commands."""
+    # Track user action
+    command = update.message.text if update.message else "unknown"
+    log_user_action(update, "command", f"unknown: {command}")
+    
     if update.message and update.message.text and update.message.text.startswith("/"):
         command = update.message.text.split()[0] if update.message.text.split() else update.message.text
         await update.message.reply_text(
