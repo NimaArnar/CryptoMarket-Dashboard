@@ -17,8 +17,11 @@ A comprehensive Telegram bot for controlling your Crypto Market Dashboard remote
 
 ### Dashboard Control
 - **Start/Stop Dashboard**: Control your dashboard server remotely
-- **Status Check**: Monitor dashboard status and process information
+- **Per-User Ownership**: Each user can start their own dashboard instance (only one can run at a time)
+- **Status Check**: Monitor dashboard status with ownership information
 - **Network Access**: Dashboard accessible from other devices on your network
+- **Real-Time Progress**: Live progress updates during dashboard startup
+- **Automatic Cleanup**: Stale processes automatically detected and cleaned up
 
 ### Data Queries
 - **Price Lookup**: Get latest price for any supported coin
@@ -31,6 +34,13 @@ A comprehensive Telegram bot for controlling your Crypto Market Dashboard remote
 - **Inline Keyboards**: Navigate commands with interactive buttons
 - **Quick Actions**: Fast access to popular coins (BTC, ETH, etc.)
 - **Menu Navigation**: Organized command menus
+- **Smart Message Management**: Button messages automatically cleaned up to avoid chat clutter
+
+### User Management
+- **Action Tracking**: All user interactions logged to `logs/bot_users_YYYYMMDD.log`
+- **Ownership Tracking**: Dashboard ownership tracked per user
+- **Multi-User Support**: Multiple users can interact with the bot simultaneously
+- **User Identification**: Correct user identification from buttons and commands
 
 ## Prerequisites
 
@@ -182,13 +192,28 @@ Bot: 💰 BTC Price
 
 ### Checking Status
 
+**When you own the dashboard:**
 ```
 User: /status
-Bot: 📊 Dashboard Status
-     ✅ Dashboard is running
-     🔗 Local: http://127.0.0.1:8052/
-     🔗 Network: http://192.168.1.100:8052/
-     📝 Process ID: 12345
+Bot: ✅ Dashboard Status: RUNNING
+     🌐 Local: http://127.0.0.1:8052/
+     🌐 Network: http://192.168.1.100:8052/
+     📊 Process ID: 12345
+     ✅ Started by you
+     🕐 Started at: 2026-01-01 22:49:19
+```
+
+**When another user owns the dashboard:**
+```
+User: /status
+Bot: ✅ Dashboard Status: RUNNING
+     🌐 Local: http://127.0.0.1:8052/
+     🌐 Network: http://192.168.1.100:8052/
+     👤 Started by: @username
+     🕐 Started at: 2026-01-01 22:49:19
+     ⚠️ You don't own this dashboard
+     💡 Only the owner can stop it with /stop
+     📊 Process ID: 12345
 ```
 
 ## Troubleshooting
@@ -315,6 +340,33 @@ The bot automatically prevents multiple instances using a lock file:
 - **Single Coin Queries**: `/price` and `/marketcap` load only the requested coin (faster)
 - **Cached Data**: Uses 24-hour cache to minimize API calls
 - **Lazy Loading**: Data loaded only when needed
+- **Fast Coin List**: `/coins` command reads directly from constants (instant response)
+
+### User Action Tracking
+
+All user interactions are logged to `logs/bot_users_YYYYMMDD.log`:
+- **Commands**: All commands with user ID, username, and details
+- **Button Clicks**: All button interactions tracked
+- **Format**: Structured log entries for easy analysis
+
+**View user activity:**
+```powershell
+# View today's user log
+$today = Get-Date -Format "yyyyMMdd"
+Get-Content "logs\bot_users_$today.log"
+
+# Search for specific user
+Select-String -Path "logs\bot_users_$today.log" -Pattern "UserID:123456789"
+```
+
+### Multi-User Dashboard Ownership
+
+The bot supports multiple users with per-user dashboard ownership:
+- **One Dashboard at a Time**: Only one dashboard can run (shared port)
+- **Ownership Tracking**: Each dashboard instance is tracked with its owner
+- **Owner-Only Control**: Only the owner can stop their dashboard
+- **Status Visibility**: All users can see who started the dashboard
+- **Automatic Cleanup**: Dead processes automatically removed from tracking
 
 ## Security Notes
 
@@ -322,6 +374,9 @@ The bot automatically prevents multiple instances using a lock file:
 - ✅ **Environment Variables**: Always use environment variables for tokens
 - ✅ **Lock Files**: Lock file mechanism prevents accidental multiple instances
 - ✅ **Network Access**: Dashboard accessible on local network (configure firewall as needed)
+- ✅ **User Tracking**: User actions logged for audit purposes
+- ✅ **Ownership Protection**: Only dashboard owners can stop their instances
+- ✅ **Error Handling**: Robust error handling with retry logic for network issues
 
 ## Support
 

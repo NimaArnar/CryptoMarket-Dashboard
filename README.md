@@ -50,10 +50,14 @@ A simplified interactive web version is available on GitHub Pages:
 ### Telegram Bot (NEW! 🤖)
 
 Control your dashboard remotely via Telegram! The bot allows you to:
-- Start/stop the dashboard server
-- Query real-time cryptocurrency prices and market caps
-- Access dashboard from any device on your network
-- Use interactive buttons for easy navigation
+- **Start/Stop Dashboard**: Control your dashboard server remotely
+- **Multi-User Support**: Per-user dashboard ownership tracking
+- **Real-Time Data Queries**: Get prices, market caps, and coin information
+- **Network Access**: Dashboard accessible from any device on your network
+- **Interactive Buttons**: Navigate commands with inline keyboards
+- **User Action Tracking**: Comprehensive logging of all bot interactions
+- **Status Monitoring**: Check dashboard status with ownership information
+- **Progress Updates**: Real-time progress indicators during dashboard startup
 
 **Quick Start:**
 1. Get a bot token from [@BotFather](https://t.me/botfather)
