@@ -222,8 +222,9 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         Input("state", "data"),
         Input("selected", "data"),
         Input("order", "data"),
+        Input("main-tabs", "value"),  # Add tab input to check active tab
     )
-    def corr_and_scatter(state, selected_syms, order):
+    def corr_and_scatter(state, selected_syms, order, active_tab):
         """Calculate correlation and render scatter plot."""
         corr_text, scatter_fig = _corr_and_scatter_internal(state, selected_syms, order, df_raw)
         
@@ -236,6 +237,12 @@ def register_callbacks(app, data_manager: DataManager) -> None:
         allowed = set(order or [])
         sel = [s for s in (selected_syms or []) if s in allowed]
         show_scatter = len(sel) == 2 and corr_mode != "off"
+        
+        # Hide scatter container if:
+        # 1. Not exactly 2 coins or correlation is off
+        # 2. OR we're on the "Latest Data" tab
+        if active_tab == "data-tab":
+            show_scatter = False
         
         # Hide scatter container if not exactly 2 coins or correlation is off
         container_style = {
