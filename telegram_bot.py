@@ -176,18 +176,23 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await update.message.reply_text("⚠️ Dashboard is not running!")
 
 
-# Track last status message to prevent duplicates
-_last_status_update_id = None
+# Track processed updates to prevent duplicates (use set to handle multiple instances)
+_processed_updates = set()
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /status command - check dashboard status."""
-    global dashboard_process, _last_status_update_id
+    global dashboard_process, _processed_updates
     
     # Prevent duplicate responses to the same update
-    if update.update_id == _last_status_update_id:
+    update_key = f"status_{update.update_id}"
+    if update_key in _processed_updates:
         logger.warning(f"Ignoring duplicate status command for update_id {update.update_id}")
         return
-    _last_status_update_id = update.update_id
+    _processed_updates.add(update_key)
+    
+    # Clean up old entries (keep only last 100)
+    if len(_processed_updates) > 100:
+        _processed_updates = set(list(_processed_updates)[-50:])
     
     # Check if our tracked process is running
     bot_started = dashboard_process and dashboard_process.poll() is None
