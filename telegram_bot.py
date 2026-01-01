@@ -1371,6 +1371,17 @@ async def main_async() -> None:
             except KeyboardInterrupt:
                 logger.info("Keyboard interrupt received")
                 stop_event.set()
+            finally:
+                # Stop polling before exiting context manager
+                logger.info("Stopping bot...")
+                try:
+                    await application.updater.stop()
+                except Exception as e:
+                    logger.warning(f"Error stopping updater: {e}")
+                try:
+                    await application.stop()
+                except Exception as e:
+                    logger.warning(f"Error stopping application: {e}")
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
