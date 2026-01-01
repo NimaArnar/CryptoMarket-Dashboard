@@ -6,7 +6,7 @@ import time
 from typing import Optional
 
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from src.config import DASH_PORT
 from src.data_manager import DataManager
