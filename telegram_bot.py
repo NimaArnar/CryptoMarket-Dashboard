@@ -317,9 +317,14 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
             dashboard_process = None
         elif port_open:
+            local_ip = _get_local_ip()
+            access_urls = f"🌐 Local: http://127.0.0.1:{DASH_PORT}/\n"
+            if local_ip:
+                access_urls += f"🌐 Network: http://{local_ip}:{DASH_PORT}/\n"
+            
             await loading_msg.edit_text(
                 f"⚠️ Dashboard process is running but HTTP check timed out.\n"
-                f"🌐 Access at: http://127.0.0.1:{DASH_PORT}/\n"
+                f"{access_urls}"
                 f"💡 The page may still be loading data. Try accessing it in your browser.\n"
                 f"⏱️ Waited {waited} seconds"
             )
