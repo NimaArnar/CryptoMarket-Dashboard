@@ -467,9 +467,14 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         pass
     
     # Build status message (only one message)
+    # Get local IP for network access
+    local_ip = _get_local_ip()
+    
     if bot_started or port_in_use or main_py_pids:
         status_text = "✅ *Dashboard Status: RUNNING*\n\n"
-        status_text += f"🌐 URL: http://127.0.0.1:{DASH_PORT}/\n"
+        status_text += f"🌐 Local: http://127.0.0.1:{DASH_PORT}/\n"
+        if local_ip:
+            status_text += f"🌐 Network: http://{local_ip}:{DASH_PORT}/\n"
         
         if bot_started:
             status_text += f"📊 Process ID: {dashboard_process.pid}\n"
@@ -515,6 +520,26 @@ def _load_data_sync() -> DataManager:
     dm = DataManager()
     dm.load_all_data()
     return dm
+
+
+def _get_local_ip() -> str:
+    """Get the local IP address for network access."""
+    try:
+        import socket
+        # Connect to a remote address to determine local IP
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0)
+        try:
+            # Doesn't actually connect, just determines local IP
+            s.connect(('8.8.8.8', 80))
+            ip = s.getsockname()[0]
+        except Exception:
+            ip = None
+        finally:
+            s.close()
+        return ip
+    except Exception:
+        return None
 
 
 def _load_single_coin_data(symbol: str) -> tuple:
