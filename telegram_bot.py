@@ -280,10 +280,56 @@ def _load_data_sync() -> DataManager:
     return dm
 
 
+def _check_dashboard_running() -> bool:
+    """Check if dashboard is running (by bot or manually)."""
+    global dashboard_process
+    
+    # Check if bot's tracked process is running
+    if dashboard_process and dashboard_process.poll() is None:
+        return True
+    
+    # Check if port is in use
+    import socket
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex(('127.0.0.1', DASH_PORT))
+        port_in_use = (result == 0)
+        sock.close()
+        if port_in_use:
+            return True
+    except:
+        pass
+    
+    # Check for main.py processes
+    import psutil
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                cmdline = proc.info.get('cmdline', [])
+                if cmdline and 'main.py' in ' '.join(cmdline):
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except:
+        pass
+    
+    return False
+
+
 async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /price command - get latest price for a coin."""
     if not context.args:
         await update.message.reply_text("❌ Please specify a coin symbol. Example: /price BTC")
+        return
+    
+    # Check if dashboard is running
+    if not _check_dashboard_running():
+        await update.message.reply_text(
+            "⚠️ *Dashboard is offline*\n\n"
+            "💡 The dashboard needs to be running to access data.\n"
+            "Use /run to start the dashboard first."
+        )
         return
     
     symbol = context.args[0].upper()
