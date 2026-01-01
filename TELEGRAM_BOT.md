@@ -292,6 +292,19 @@ python telegram_bot.py
 - Ensure only ONE instance is running
 - Check all machines/devices using the same token
 - Use the lock file mechanism (automatic)
+- The bot automatically prevents multiple instances with lock file protection
+
+### Network Timeout Errors
+
+**Error:** `Timed out` or `ConnectTimeout` during bot startup
+
+**Cause:** Network connectivity issues or Telegram API temporarily unavailable
+
+**Solution:**
+- Check your internet connection
+- Verify firewall/proxy settings aren't blocking Telegram API
+- The bot automatically retries with exponential backoff (up to 3 attempts)
+- Wait a few seconds and try again
 
 ### Checking Logs
 
