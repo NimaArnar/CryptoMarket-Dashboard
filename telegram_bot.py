@@ -100,8 +100,8 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         
         import socket
         import http.client
-        max_wait = 60  # Maximum wait time in seconds
-        wait_interval = 2  # Check every 2 seconds
+        max_wait = 120  # Maximum wait time in seconds (2 minutes for data loading)
+        wait_interval = 3  # Check every 3 seconds
         waited = 0
         
         while waited < max_wait:
@@ -130,15 +130,32 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                         response_data = response.read().decode('utf-8', errors='ignore')
                         conn.close()
                         
-                        # Check if response is valid HTML (dashboard should return HTML)
-                        if response.status == 200 and ('<html' in response_data.lower() or 'dash' in response_data.lower() or len(response_data) > 100):
-                            # Dashboard is ready!
-                            await loading_msg.edit_text(
-                                f"✅ Dashboard started successfully!\n"
-                                f"🌐 Access at: http://127.0.0.1:{DASH_PORT}/\n"
-                                f"⏱️ Ready in {waited} seconds"
+                        # Check if response is valid (dashboard should return HTML or JSON)
+                        # Accept any 200 response with reasonable content length
+                        if response.status == 200:
+                            # Check if it's HTML or has substantial content
+                            is_valid = (
+                                '<html' in response_data.lower() or 
+                                'dash' in response_data.lower() or 
+                                len(response_data) > 500 or
+                                'text/html' in response.getheader('Content-Type', '').lower()
                             )
-                            return
+                            
+                            if is_valid:
+                                # Dashboard is ready!
+                                await loading_msg.edit_text(
+                                    f"✅ Dashboard started successfully!\n"
+                                    f"🌐 Access at: http://127.0.0.1:{DASH_PORT}/\n"
+                                    f"⏱️ Ready in {waited} seconds"
+                                )
+                                return
+                            else:
+                                # Got 200 but content seems incomplete, keep waiting
+                                logger.debug(f"Got 200 but content seems incomplete (length: {len(response_data)})")
+                    except http.client.HTTPException as e:
+                        # HTTP error, but port is open - keep waiting
+                        logger.debug(f"HTTP exception (will retry): {e}")
+                        pass
                     except Exception as e:
                         # HTTP request failed, but port is open - keep waiting
                         logger.debug(f"HTTP check failed (will retry): {e}")
