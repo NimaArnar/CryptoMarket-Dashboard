@@ -47,6 +47,22 @@ A simplified interactive web version is available on GitHub Pages:
 - **No Installation Required**: Runs entirely in your browser using JavaScript
 - **Note**: This is a sample version focusing on BTC and ETH. The full Python application supports 25+ coins with advanced features.
 
+### Telegram Bot (NEW! 🤖)
+
+Control your dashboard remotely via Telegram! The bot allows you to:
+- Start/stop the dashboard server
+- Query real-time cryptocurrency prices and market caps
+- Access dashboard from any device on your network
+- Use interactive buttons for easy navigation
+
+**Quick Start:**
+1. Get a bot token from [@BotFather](https://t.me/botfather)
+2. Set environment variable: `$env:TELEGRAM_BOT_TOKEN="your-token"`
+3. Run: `python telegram_bot.py`
+4. Send `/start` to your bot in Telegram
+
+**Full Documentation:** See [TELEGRAM_BOT.md](TELEGRAM_BOT.md) for complete setup and usage guide.
+
 ### Basic Usage (Free API) - Full Python Application
 
 ```bash
@@ -105,10 +121,15 @@ python main.py
 ```
 CryptoMarket-Dashboard/
 ├── main.py                          # Entry point (Python application)
+├── telegram_bot.py                  # Telegram bot for remote control
 ├── requirements.txt                 # Python dependencies
 ├── README.md                        # This file
+├── TELEGRAM_BOT.md                  # Telegram bot complete guide
 ├── DEPLOYMENT.md                    # Deployment guide
 ├── .gitignore                      # Git ignore rules
+├── scripts/                         # Utility scripts
+│   ├── set_bot_description.py      # Set bot description via API
+│   └── generate_static_dashboard.py # Generate static dashboard
 ├── docs/                            # GitHub Pages web version
 │   └── index.html                  # Interactive JavaScript dashboard
 ├── src/                            # Source code

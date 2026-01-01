@@ -30,12 +30,19 @@ async def set_bot_description():
         print("  Linux/Mac: export TELEGRAM_BOT_TOKEN='your-token'")
         sys.exit(1)
     
-    # Read description from file
+    # Read description from file (look in project root, not scripts folder)
+    import pathlib
+    script_dir = pathlib.Path(__file__).parent
+    project_root = script_dir.parent
+    description_file = project_root / "BOT_DESCRIPTION.txt"
+    
     try:
-        with open("BOT_DESCRIPTION.txt", "r", encoding="utf-8") as f:
+        with open(description_file, "r", encoding="utf-8") as f:
             description = f.read().strip()
     except FileNotFoundError:
         print("❌ Error: BOT_DESCRIPTION.txt not found.")
+        print(f"Expected location: {description_file}")
+        print("\nCreate BOT_DESCRIPTION.txt in the project root with your bot description.")
         sys.exit(1)
     
     # Check description length (Telegram limit is 512 characters)
