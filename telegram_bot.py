@@ -156,13 +156,17 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                         # HTTP error, but port is open - keep waiting
                         logger.debug(f"HTTP exception (will retry): {e}")
                         pass
+                    except (ConnectionError, socket.timeout, OSError) as e:
+                        # Connection/timeout error - port might not be ready yet
+                        logger.debug(f"Connection error (will retry): {e}")
+                        pass
                     except Exception as e:
-                        # HTTP request failed, but port is open - keep waiting
+                        # Other HTTP error, but port is open - keep waiting
                         logger.debug(f"HTTP check failed (will retry): {e}")
                         pass
             except Exception as e:
-                # HTTP request failed, but port is open - keep waiting
-                logger.debug(f"HTTP check failed (will retry): {e}")
+                # Socket connection error - keep waiting
+                logger.debug(f"Socket check failed (will retry): {e}")
                 pass
             
             # Wait before next check
