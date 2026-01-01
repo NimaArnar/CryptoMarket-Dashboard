@@ -2,20 +2,26 @@
 import asyncio
 import http.client
 import os
+import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 from typing import Optional
 
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
+from telegram.error import Conflict, RetryAfter, TimedOut
 
-from src.config import DASH_PORT
+from src.config import DASH_PORT, PROJECT_ROOT
 from src.data_manager import DataManager
 from src.utils import setup_logger
 
 logger = setup_logger(__name__)
+
+# Lock file for ensuring only one instance runs
+LOCK_FILE = PROJECT_ROOT / ".telegram_bot.lock"
 
 # Global variable to track if dashboard is running
 dashboard_process: Optional[subprocess.Popen] = None
@@ -26,23 +32,273 @@ data_manager: Optional[DataManager] = None
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 
+def create_main_keyboard() -> InlineKeyboardMarkup:
+    """Create the main inline keyboard with command buttons."""
+    keyboard = [
+        [
+            InlineKeyboardButton("📊 Dashboard Control", callback_data="menu_dashboard")
+        ],
+        [
+            InlineKeyboardButton("💰 Data Queries", callback_data="menu_data")
+        ],
+        [
+            InlineKeyboardButton("⚡ Quick Actions", callback_data="menu_quick")
+        ],
+        [
+            InlineKeyboardButton("❓ Help", callback_data="help")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def create_dashboard_keyboard() -> InlineKeyboardMarkup:
+    """Create keyboard for dashboard control commands."""
+    keyboard = [
+        [
+            InlineKeyboardButton("▶️ Start Dashboard", callback_data="cmd_run")
+        ],
+        [
+            InlineKeyboardButton("⏹️ Stop Dashboard", callback_data="cmd_stop")
+        ],
+        [
+            InlineKeyboardButton("📊 Status", callback_data="cmd_status")
+        ],
+        [
+            InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def create_data_keyboard() -> InlineKeyboardMarkup:
+    """Create keyboard for data query commands."""
+    keyboard = [
+        [
+            InlineKeyboardButton("📋 List All Coins", callback_data="cmd_coins")
+        ],
+        [
+            InlineKeyboardButton("📈 Latest Prices", callback_data="cmd_latest")
+        ],
+        [
+            InlineKeyboardButton("💵 Price (BTC)", callback_data="price_BTC"),
+            InlineKeyboardButton("💵 Price (ETH)", callback_data="price_ETH")
+        ],
+        [
+            InlineKeyboardButton("💎 Market Cap (BTC)", callback_data="marketcap_BTC"),
+            InlineKeyboardButton("💎 Market Cap (ETH)", callback_data="marketcap_ETH")
+        ],
+        [
+            InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def create_quick_actions_keyboard() -> InlineKeyboardMarkup:
+    """Create keyboard for quick actions (popular coins)."""
+    keyboard = [
+        [
+            InlineKeyboardButton("₿ BTC", callback_data="price_BTC"),
+            InlineKeyboardButton("Ξ ETH", callback_data="price_ETH"),
+            InlineKeyboardButton("BNB", callback_data="price_BNB")
+        ],
+        [
+            InlineKeyboardButton("🔗 LINK", callback_data="price_LINK"),
+            InlineKeyboardButton("🔷 ARB", callback_data="price_ARB"),
+            InlineKeyboardButton("🔺 AVAX", callback_data="price_AVAX")
+        ],
+        [
+            InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle button callback queries."""
+    query = update.callback_query
+    
+    if not query:
+        logger.error("telegram_bot - button_callback called without callback_query")
+        return
+    
+    try:
+        await query.answer()  # Acknowledge the callback
+    except Exception as e:
+        logger.warning(f"telegram_bot - Error answering callback: {e}")
+        # Continue anyway - the callback might have been processed
+    
+    data = query.data
+    
+    if not data:
+        logger.error("telegram_bot - button_callback called without callback data")
+        return
+    
+    # Log button click for debugging
+    logger.info(f"telegram_bot - Button clicked: {data}")
+    
+    # Menu navigation - delete previous button message and send new one to avoid crowding
+    chat_id = query.message.chat_id
+    
+    if data == "menu_main":
+        # Delete the message that contains the buttons
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete message: {e}")
+        
+        welcome_message = (
+            "🤖 *Crypto Market Dashboard Bot*\n\n"
+            "Select an option from the menu below:"
+        )
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=welcome_message,
+            parse_mode="Markdown",
+            reply_markup=create_main_keyboard()
+        )
+        return
+    
+    elif data == "menu_dashboard":
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete message: {e}")
+        
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="📊 *Dashboard Control*\n\nControl your dashboard server:",
+            parse_mode="Markdown",
+            reply_markup=create_dashboard_keyboard()
+        )
+        return
+    
+    elif data == "menu_data":
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete message: {e}")
+        
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="💰 *Data Queries*\n\nGet real-time cryptocurrency data:",
+            parse_mode="Markdown",
+            reply_markup=create_data_keyboard()
+        )
+        return
+    
+    elif data == "menu_quick":
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete message: {e}")
+        
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="⚡ *Quick Actions*\n\nQuick access to popular coins:",
+            parse_mode="Markdown",
+            reply_markup=create_quick_actions_keyboard()
+        )
+        return
+    
+    elif data == "help":
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete message: {e}")
+        
+        help_text = (
+            "📚 *Help - Crypto Market Dashboard Bot*\n\n"
+            "📊 *Dashboard Control:*\n"
+            "*/run* - Start the dashboard server\n"
+            "*/stop* - Stop the dashboard server\n"
+            "*/status* - Check if dashboard is running\n\n"
+            "💰 *Data Queries:*\n"
+            "*/price <SYMBOL>* - Get latest price (e.g., /price BTC)\n"
+            "*/marketcap <SYMBOL>* - Get market cap (e.g., /marketcap ETH)\n"
+            "*/coins* - List all available coins\n"
+            "*/latest* - Latest prices for all coins\n"
+            "*/info <SYMBOL>* - Detailed coin information\n\n"
+            f"🌐 Dashboard: http://127.0.0.1:{DASH_PORT}/"
+        )
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=help_text,
+            parse_mode="Markdown",
+            reply_markup=create_main_keyboard()
+        )
+        return
+    
+    # Command execution - create a new Update object with the message from callback query
+    # Update objects are immutable, so we need to create a new one
+    from telegram import Update as UpdateClass
+    
+    # Command execution
+    if data == "cmd_run":
+        # Create new Update with message from callback query
+        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        await run_command(cmd_update, context)
+        return
+    
+    elif data == "cmd_stop":
+        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        await stop_command(cmd_update, context)
+        return
+    
+    elif data == "cmd_status":
+        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        await status_command(cmd_update, context)
+        return
+    
+    elif data == "cmd_coins":
+        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        await coins_command(cmd_update, context)
+        return
+    
+    elif data == "cmd_latest":
+        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        await latest_command(cmd_update, context)
+        return
+    
+    # Price and marketcap commands with symbol
+    elif data.startswith("price_"):
+        symbol = data.split("_")[1]
+        context.args = [symbol]
+        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        await price_command(cmd_update, context)
+        return
+    
+    elif data.startswith("marketcap_"):
+        symbol = data.split("_")[1]
+        context.args = [symbol]
+        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        await marketcap_command(cmd_update, context)
+        return
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command."""
     welcome_message = (
         "🤖 *Crypto Market Dashboard Bot*\n\n"
-        "📊 *Dashboard Control:*\n"
-        "/run - Start the dashboard\n"
-        "/stop - Stop the dashboard\n"
-        "/status - Check dashboard status\n\n"
-        "💰 *Data Queries:*\n"
-        "/price BTC - Get latest price\n"
-        "/marketcap ETH - Get market cap\n"
-        "/coins - List all available coins\n"
-        "/latest - Latest prices for all coins\n"
-        "/info BTC - Detailed coin information\n\n"
-        "/help - Show detailed help"
+        "Welcome! Use the buttons below to control your dashboard and get crypto data.\n\n"
+        "You can also use commands directly:\n"
+        "/run, /stop, /status, /price, /marketcap, /coins, /latest, /info, /help"
     )
-    await update.message.reply_text(welcome_message, parse_mode="Markdown")
+    
+    keyboard = create_main_keyboard()
+    logger.info(f"telegram_bot - /start command received. Creating keyboard with {len(keyboard.inline_keyboard)} rows")
+    logger.info(f"telegram_bot - Keyboard buttons: {[row[0].text for row in keyboard.inline_keyboard]}")
+    
+    try:
+        await update.message.reply_text(
+            welcome_message,
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        logger.info("telegram_bot - /start message sent successfully with keyboard")
+    except Exception as e:
+        logger.error(f"telegram_bot - Error sending /start message: {e}")
+        raise
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -61,7 +317,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "*/info <SYMBOL>* - Detailed coin information\n\n"
         f"🌐 Dashboard: http://127.0.0.1:{DASH_PORT}/"
     )
-    await update.message.reply_text(help_text, parse_mode="Markdown")
+    await update.message.reply_text(
+        help_text,
+        parse_mode="Markdown",
+        reply_markup=create_main_keyboard()
+    )
 
 
 async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -969,15 +1229,93 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
 
-def main() -> None:
-    """Start the Telegram bot."""
+def check_and_create_lock() -> bool:
+    """
+    Check if another instance is running and create lock file if not.
+    Returns True if lock was created (no other instance), False if another instance exists.
+    """
+    if LOCK_FILE.exists():
+        # Check if the process in the lock file is still running
+        try:
+            with open(LOCK_FILE, 'r') as f:
+                lock_pid = int(f.read().strip())
+            
+            # Check if process with this PID exists
+            try:
+                import psutil
+                if psutil.pid_exists(lock_pid):
+                    # Check if it's actually our bot process
+                    proc = psutil.Process(lock_pid)
+                    cmdline = ' '.join(proc.cmdline()) if proc.cmdline() else ''
+                    if 'telegram_bot.py' in cmdline:
+                        logger.error(f"Another bot instance is already running (PID: {lock_pid})")
+                        logger.error(f"Command: {cmdline}")
+                        return False
+            except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
+                # Process doesn't exist or we can't access it - lock file is stale
+                logger.warning(f"Stale lock file found (PID: {lock_pid} no longer exists). Removing it...")
+                LOCK_FILE.unlink()
+        except (ValueError, IOError) as e:
+            logger.warning(f"Could not read lock file: {e}. Removing it...")
+            LOCK_FILE.unlink()
+    
+    # Create lock file with current PID
+    try:
+        with open(LOCK_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+        logger.debug(f"Lock file created: {LOCK_FILE} (PID: {os.getpid()})")
+        return True
+    except IOError as e:
+        logger.error(f"Could not create lock file: {e}")
+        return False
+
+
+def remove_lock() -> None:
+    """Remove the lock file."""
+    try:
+        if LOCK_FILE.exists():
+            LOCK_FILE.unlink()
+            logger.debug("Lock file removed")
+    except Exception as e:
+        logger.warning(f"Could not remove lock file: {e}")
+
+
+async def main_async() -> None:
+    """Async main function to start the Telegram bot."""
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN environment variable is not set!")
         logger.error("Please set it with: export TELEGRAM_BOT_TOKEN='your-token'")
         return
     
+    # Check if another instance is running
+    if not check_and_create_lock():
+        logger.error("Cannot start bot: Another instance is already running!")
+        logger.error("To start anyway, stop the other instance first or delete the lock file:")
+        logger.error(f"  Remove: {LOCK_FILE}")
+        return
+    
+    # Ensure lock is removed on exit
+    import atexit
+    atexit.register(remove_lock)
+    
+    # Delete any existing webhook to ensure clean polling state
+    from telegram import Bot
+    try:
+        bot = Bot(token=TELEGRAM_BOT_TOKEN)
+        webhook_info = await bot.get_webhook_info()
+        if webhook_info.url:
+            logger.info(f"Found existing webhook: {webhook_info.url}. Deleting it...")
+            await bot.delete_webhook(drop_pending_updates=True)
+            logger.info("Webhook deleted. Ready for polling.")
+        await bot.close()
+    except Exception as e:
+        logger.warning(f"Could not check/delete webhook: {e}. Continuing anyway...")
+    
     # Create application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    # Register callback query handler (for buttons) - must be before command handlers
+    application.add_handler(CallbackQueryHandler(button_callback))
     
     # Register command handlers
     application.add_handler(CommandHandler("start", start_command))
@@ -997,9 +1335,60 @@ def main() -> None:
     # This catches any command that starts with / but isn't handled above
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
     
-    # Start the bot
+    # Start the bot using async context manager (recommended for v20+)
     logger.info("Starting Telegram bot...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    try:
+        async with application:
+            await application.start()
+            await application.updater.start_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True
+            )
+            logger.info("Bot is running. Press Ctrl+C to stop.")
+            # Keep running until interrupted
+            # Use a signal-based approach for clean shutdown
+            import signal
+            stop_event = asyncio.Event()
+            
+            def signal_handler():
+                logger.info("Shutdown signal received")
+                stop_event.set()
+            
+            # Set up signal handlers for graceful shutdown
+            if sys.platform != "win32":
+                loop = asyncio.get_event_loop()
+                for sig in (signal.SIGTERM, signal.SIGINT):
+                    loop.add_signal_handler(sig, signal_handler)
+            
+            try:
+                await stop_event.wait()
+            except KeyboardInterrupt:
+                logger.info("Keyboard interrupt received")
+                stop_event.set()
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Error in bot main loop: {e}")
+        raise
+    finally:
+        # Remove lock file on exit
+        remove_lock()
+
+
+def main() -> None:
+    """Start the Telegram bot."""
+    try:
+        asyncio.run(main_async())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Error running bot: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise
+    finally:
+        # Ensure lock is removed even on unexpected exit
+        remove_lock()
 
 
 if __name__ == "__main__":
