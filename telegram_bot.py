@@ -70,7 +70,7 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     
     try:
-        await update.message.reply_text("🔄 Starting dashboard...")
+        loading_msg = await update.message.reply_text("🔄 Starting dashboard...")
         
         # Start dashboard in a separate process
         dashboard_process = subprocess.Popen(
@@ -80,25 +80,83 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             text=True
         )
         
-        # Wait a moment to check if it started successfully
+        # Wait a moment to check if process started
         time.sleep(2)
         
-        if dashboard_process.poll() is None:
-            await update.message.reply_text(
-                f"✅ Dashboard started successfully!\n"
-                f"🌐 Access at: http://127.0.0.1:{DASH_PORT}/"
-            )
-        else:
+        if dashboard_process.poll() is not None:
             # Process exited immediately - there was an error
             stderr = dashboard_process.stderr.read() if dashboard_process.stderr else "Unknown error"
-            await update.message.reply_text(
+            await loading_msg.edit_text(
                 f"❌ Failed to start dashboard:\n{stderr[:500]}"
             )
             dashboard_process = None
+            return
+        
+        # Wait for dashboard to be ready (check if port responds)
+        await loading_msg.edit_text("🔄 Starting dashboard...\n⏳ Waiting for dashboard to load data...")
+        
+        import socket
+        import http.client
+        max_wait = 60  # Maximum wait time in seconds
+        wait_interval = 2  # Check every 2 seconds
+        waited = 0
+        
+        while waited < max_wait:
+            # Check if process is still running
+            if dashboard_process.poll() is not None:
+                stderr = dashboard_process.stderr.read() if dashboard_process.stderr else "Unknown error"
+                await loading_msg.edit_text(
+                    f"❌ Dashboard process exited:\n{stderr[:500]}"
+                )
+                dashboard_process = None
+                return
+            
+            # Check if port is open and responding
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                result = sock.connect_ex(('127.0.0.1', DASH_PORT))
+                sock.close()
+                
+                if result == 0:
+                    # Port is open, try to get HTTP response
+                    try:
+                        conn = http.client.HTTPConnection('127.0.0.1', DASH_PORT, timeout=2)
+                        conn.request('GET', '/')
+                        response = conn.getresponse()
+                        conn.close()
+                        
+                        if response.status == 200:
+                            # Dashboard is ready!
+                            await loading_msg.edit_text(
+                                f"✅ Dashboard started successfully!\n"
+                                f"🌐 Access at: http://127.0.0.1:{DASH_PORT}/\n"
+                                f"⏱️ Ready in {waited} seconds"
+                            )
+                            return
+                    except:
+                        # HTTP request failed, but port is open - keep waiting
+                        pass
+            except:
+                pass
+            
+            # Wait before next check
+            await asyncio.sleep(wait_interval)
+            waited += wait_interval
+        
+        # Timeout - dashboard might still be starting
+        await loading_msg.edit_text(
+            f"⚠️ Dashboard process started but not fully ready yet.\n"
+            f"🌐 Access at: http://127.0.0.1:{DASH_PORT}/\n"
+            f"💡 It may take a few more moments to load all data."
+        )
             
     except Exception as e:
         logger.error(f"Error starting dashboard: {e}")
-        await update.message.reply_text(f"❌ Error: {str(e)}")
+        try:
+            await loading_msg.edit_text(f"❌ Error: {str(e)}")
+        except:
+            await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
