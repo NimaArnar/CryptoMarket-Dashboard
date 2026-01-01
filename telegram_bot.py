@@ -122,14 +122,16 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 sock.close()
                 
                 if result == 0:
-                    # Port is open, try to get HTTP response
+                    # Port is open, try to get HTTP response and verify content
                     try:
-                        conn = http.client.HTTPConnection('127.0.0.1', DASH_PORT, timeout=2)
+                        conn = http.client.HTTPConnection('127.0.0.1', DASH_PORT, timeout=3)
                         conn.request('GET', '/')
                         response = conn.getresponse()
+                        response_data = response.read().decode('utf-8', errors='ignore')
                         conn.close()
                         
-                        if response.status == 200:
+                        # Check if response is valid HTML (dashboard should return HTML)
+                        if response.status == 200 and ('<html' in response_data.lower() or 'dash' in response_data.lower() or len(response_data) > 100):
                             # Dashboard is ready!
                             await loading_msg.edit_text(
                                 f"✅ Dashboard started successfully!\n"
@@ -137,8 +139,9 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                                 f"⏱️ Ready in {waited} seconds"
                             )
                             return
-                    except:
+                    except Exception as e:
                         # HTTP request failed, but port is open - keep waiting
+                        logger.debug(f"HTTP check failed (will retry): {e}")
                         pass
             except:
                 pass
