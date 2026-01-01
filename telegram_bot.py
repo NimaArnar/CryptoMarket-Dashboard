@@ -429,6 +429,15 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("❌ Please specify a coin symbol. Example: /marketcap BTC")
         return
     
+    # Check if dashboard is running
+    if not _check_dashboard_running():
+        await update.message.reply_text(
+            "⚠️ *Dashboard is offline*\n\n"
+            "💡 The dashboard needs to be running to access data.\n"
+            "Use /run to start the dashboard first."
+        )
+        return
+    
     symbol = context.args[0].upper()
     loading_msg = None
     
@@ -476,6 +485,15 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /coins command - list all available coins."""
+    # Check if dashboard is running
+    if not _check_dashboard_running():
+        await update.message.reply_text(
+            "⚠️ *Dashboard is offline*\n\n"
+            "💡 The dashboard needs to be running to access data.\n"
+            "Use /run to start the dashboard first."
+        )
+        return
+    
     loading_msg = None
     try:
         loading_msg = await update.message.reply_text("🔄 Loading data...")
@@ -525,6 +543,15 @@ async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /latest command - get latest prices for all coins."""
+    # Check if dashboard is running
+    if not _check_dashboard_running():
+        await update.message.reply_text(
+            "⚠️ *Dashboard is offline*\n\n"
+            "💡 The dashboard needs to be running to access data.\n"
+            "Use /run to start the dashboard first."
+        )
+        return
+    
     loading_msg = None
     try:
         loading_msg = await update.message.reply_text("🔄 Loading data...")
@@ -594,6 +621,15 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """Handle /info command - get detailed information for a coin."""
     if not context.args:
         await update.message.reply_text("❌ Please specify a coin symbol. Example: /info BTC")
+        return
+    
+    # Check if dashboard is running
+    if not _check_dashboard_running():
+        await update.message.reply_text(
+            "⚠️ *Dashboard is offline*\n\n"
+            "💡 The dashboard needs to be running to access data.\n"
+            "Use /run to start the dashboard first."
+        )
         return
     
     symbol = context.args[0].upper()
