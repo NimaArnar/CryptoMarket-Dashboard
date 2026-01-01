@@ -869,25 +869,29 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if len(_processed_updates) > 100:
         _processed_updates = set(list(_processed_updates)[-50:])
     
-    # Check if this user owns a running dashboard
-    user_owns_dashboard = False
-    if user_id and user_id in dashboard_owners:
-        owner_info = dashboard_owners[user_id]
-        dashboard_process = owner_info["process"]
-        user_owns_dashboard = dashboard_process and dashboard_process.poll() is None
-    
     # Check if any dashboard is running
-    bot_started = dashboard_process and dashboard_process.poll() is None if user_owns_dashboard else False
     any_dashboard_running = _check_dashboard_running()
     
-    # Find who owns the running dashboard
+    # Find who owns the running dashboard (if any)
     running_owner = None
+    running_process = None
     if any_dashboard_running:
         for uid, info in dashboard_owners.items():
             if info["process"] and info["process"].poll() is None:
                 running_owner = {"user_id": uid, "username": info.get("username", "unknown"), "started_at": info.get("started_at")}
-                dashboard_process = info["process"]
+                running_process = info["process"]
                 break
+    
+    # Check if this user owns the running dashboard
+    user_owns_dashboard = False
+    user_process = None
+    if user_id and user_id in dashboard_owners:
+        owner_info = dashboard_owners[user_id]
+        user_process = owner_info["process"]
+        user_owns_dashboard = user_process and user_process.poll() is None
+    
+    # Determine if the current user owns the running dashboard
+    bot_started = user_owns_dashboard and (running_owner is not None and running_owner["user_id"] == user_id)
     
     # Also check if dashboard is running on the port (even if not started by bot)
     import socket
@@ -904,7 +908,12 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Check for main.py processes - collect all PIDs (excluding bot's tracked process)
     import psutil
     main_py_pids = []
-    tracked_pid = dashboard_process.pid if bot_started else None
+    # Use the running process PID if we found one, otherwise use user's process if they own it
+    tracked_pid = None
+    if user_owns_dashboard and user_process:
+        tracked_pid = user_process.pid
+    elif running_process:
+        tracked_pid = running_process.pid
     try:
         for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
             try:
@@ -932,10 +941,12 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             status_text += f"🌐 Network: http://{local_ip}:{DASH_PORT}/\n"
         
         # Show ownership information
-        if bot_started and user_owns_dashboard:
-            status_text += f"📊 Process ID: {dashboard_process.pid}\n"
+        if user_owns_dashboard and running_owner and running_owner["user_id"] == user_id:
+            # User owns the running dashboard
+            if user_process:
+                status_text += f"📊 Process ID: {user_process.pid}\n"
             status_text += "✅ *Started by you*\n"
-            if running_owner and running_owner.get("started_at"):
+            if running_owner.get("started_at"):
                 started_time = running_owner["started_at"].strftime("%Y-%m-%d %H:%M:%S")
                 status_text += f"🕐 Started at: {started_time}\n"
             # Also show manually started processes if any
@@ -953,8 +964,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 status_text += f"🕐 Started at: {started_time}\n"
             status_text += "\n⚠️ *You don't own this dashboard*\n"
             status_text += "💡 Only the owner can stop it with /stop"
-            if dashboard_process:
-                status_text += f"\n📊 Process ID: {dashboard_process.pid}"
+            if running_process:
+                status_text += f"\n📊 Process ID: {running_process.pid}"
         elif main_py_pids:
             # Show all PIDs if multiple, or just one
             if len(main_py_pids) == 1:
