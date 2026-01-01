@@ -143,7 +143,9 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                         # HTTP request failed, but port is open - keep waiting
                         logger.debug(f"HTTP check failed (will retry): {e}")
                         pass
-            except:
+            except Exception as e:
+                # HTTP request failed, but port is open - keep waiting
+                logger.debug(f"HTTP check failed (will retry): {e}")
                 pass
             
             # Wait before next check
@@ -151,11 +153,29 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             waited += wait_interval
         
         # Timeout - dashboard might still be starting
-        await loading_msg.edit_text(
-            f"⚠️ Dashboard process started but not fully ready yet.\n"
-            f"🌐 Access at: http://127.0.0.1:{DASH_PORT}/\n"
-            f"💡 It may take a few more moments to load all data."
-        )
+        # Check one more time if port is at least open
+        port_open = False
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('127.0.0.1', DASH_PORT))
+            port_open = (result == 0)
+            sock.close()
+        except:
+            pass
+        
+        if port_open:
+            await loading_msg.edit_text(
+                f"⚠️ Dashboard process started but may still be loading data.\n"
+                f"🌐 Access at: http://127.0.0.1:{DASH_PORT}/\n"
+                f"💡 The page may take a few more moments to fully load.\n"
+                f"⏱️ Waited {waited} seconds"
+            )
+        else:
+            await loading_msg.edit_text(
+                f"❌ Dashboard process started but port is not responding.\n"
+                f"💡 Check the dashboard logs for errors."
+            )
             
     except Exception as e:
         logger.error(f"Error starting dashboard: {e}")
