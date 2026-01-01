@@ -54,6 +54,9 @@ Thumbs.db
 # Telegram bot token (never commit!)
 TELEGRAM_BOT_TOKEN
 .env.local
+start_bot.ps1
+start_bot.bat
+.telegram_bot.lock
 
 # Jupyter Notebook
 .ipynb_checkpoints

@@ -1,0 +1,8 @@
+@echo off
+REM Batch script to start Telegram bot
+REM Copy this file to start_bot.bat and add your token
+
+set TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+python telegram_bot.py
+pause
+
