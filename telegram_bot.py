@@ -692,6 +692,18 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
+async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle unknown commands."""
+    if update.message and update.message.text and update.message.text.startswith("/"):
+        command = update.message.text.split()[0] if update.message.text.split() else update.message.text
+        await update.message.reply_text(
+            f"❌ *Unknown Command*\n\n"
+            f"Command `{command}` does not exist.\n\n"
+            f"💡 Use /help to see all available commands.",
+            parse_mode="Markdown"
+        )
+
+
 def main() -> None:
     """Start the Telegram bot."""
     if not TELEGRAM_BOT_TOKEN:
@@ -715,6 +727,10 @@ def main() -> None:
     application.add_handler(CommandHandler("coins", coins_command))
     application.add_handler(CommandHandler("latest", latest_command))
     application.add_handler(CommandHandler("info", info_command))
+    
+    # Unknown command handler (must be last to catch unhandled commands)
+    # This catches any command that starts with / but isn't handled above
+    application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
     
     # Start the bot
     logger.info("Starting Telegram bot...")
