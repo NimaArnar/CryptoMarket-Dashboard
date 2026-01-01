@@ -882,21 +882,37 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 running_process = info["process"]
                 break
     
+    # Debug logging
+    logger.debug(f"Status check - user_id: {user_id} (type: {type(user_id)}), running_owner: {running_owner}")
+    if running_owner:
+        logger.debug(f"Running owner user_id: {running_owner.get('user_id')} (type: {type(running_owner.get('user_id'))})")
+    logger.debug(f"Dashboard owners keys: {list(dashboard_owners.keys())}")
+    
     # Check if this user owns the running dashboard
     # Only true if the running owner is the current user
     user_owns_dashboard = False
     user_process = None
-    if running_owner and running_owner["user_id"] == user_id:
-        # Current user owns the running dashboard
-        user_owns_dashboard = True
-        user_process = running_process
+    
+    # Explicitly check: only set to True if running_owner exists AND matches current user
+    # Use explicit type conversion to ensure comparison works
+    if running_owner is not None and user_id is not None:
+        running_owner_id = running_owner.get("user_id")
+        # Ensure both are same type for comparison
+        if int(running_owner_id) == int(user_id):
+            # Current user owns the running dashboard
+            user_owns_dashboard = True
+            user_process = running_process
+            logger.info(f"User {user_id} owns the running dashboard")
+        else:
+            logger.info(f"User {user_id} does NOT own dashboard (owned by {running_owner_id})")
     elif user_id and user_id in dashboard_owners:
-        # User has a dashboard entry, but it's not the one running
+        # User has a dashboard entry, but it's not the one running (or no dashboard is running)
         owner_info = dashboard_owners[user_id]
         user_process = owner_info["process"]
         # Check if their process is still running (might be stale)
         if user_process and user_process.poll() is not None:
             # Process is dead, remove from owners
+            logger.debug(f"Removing stale dashboard entry for user {user_id}")
             del dashboard_owners[user_id]
             user_process = None
     
@@ -952,14 +968,17 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
         # Show ownership information
         # Only show "Started by you" if running_owner exists and matches current user
-        if running_owner and running_owner["user_id"] == user_id:
-            # User owns the running dashboard
-            if running_process:
-                status_text += f"📊 Process ID: {running_process.pid}\n"
-            status_text += "✅ *Started by you*\n"
-            if running_owner.get("started_at"):
-                started_time = running_owner["started_at"].strftime("%Y-%m-%d %H:%M:%S")
-                status_text += f"🕐 Started at: {started_time}\n"
+        # Explicit check: running_owner must exist AND user_id must match (with type safety)
+        if running_owner is not None and user_id is not None:
+            running_owner_id = running_owner.get("user_id")
+            if running_owner_id is not None and int(running_owner_id) == int(user_id):
+                # User owns the running dashboard
+                if running_process:
+                    status_text += f"📊 Process ID: {running_process.pid}\n"
+                status_text += "✅ *Started by you*\n"
+                if running_owner.get("started_at"):
+                    started_time = running_owner["started_at"].strftime("%Y-%m-%d %H:%M:%S")
+                    status_text += f"🕐 Started at: {started_time}\n"
             # Also show manually started processes if any
             if main_py_pids:
                 if len(main_py_pids) == 1:
