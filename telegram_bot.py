@@ -81,6 +81,9 @@ dashboard_process: Optional[subprocess.Popen] = None
 dashboard_thread: Optional[threading.Thread] = None
 data_manager: Optional[DataManager] = None
 
+# Track which user started the dashboard (user_id -> process info)
+dashboard_owners: dict[int, dict] = {}  # user_id -> {"process": Popen, "started_at": datetime, "username": str}
+
 # Telegram Bot Token (set via environment variable)
 # Strip whitespace to prevent issues with accidental spaces
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
@@ -392,10 +395,48 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     # Track user action
     log_user_action(update, "command", "/run")
     
-    global dashboard_process, dashboard_thread
+    global dashboard_process, dashboard_thread, dashboard_owners
     
-    if dashboard_process and dashboard_process.poll() is None:
-        await update.message.reply_text("⚠️ Dashboard is already running!")
+    user = update.effective_user
+    user_id = user.id if user else None
+    
+    if not user_id:
+        await update.message.reply_text("❌ Could not identify user.")
+        return
+    
+    # Check if this user already has a dashboard running
+    if user_id in dashboard_owners:
+        owner_info = dashboard_owners[user_id]
+        if owner_info["process"] and owner_info["process"].poll() is None:
+            await update.message.reply_text(
+                "⚠️ *You already have a dashboard running!*\n\n"
+                "Use /stop to stop your dashboard first."
+            )
+            return
+    
+    # Check if any dashboard is running (port check)
+    if _check_dashboard_running():
+        # Find who started it
+        running_owner = None
+        for uid, info in dashboard_owners.items():
+            if info["process"] and info["process"].poll() is None:
+                running_owner = info
+                break
+        
+        if running_owner:
+            owner_username = running_owner.get("username", "another user")
+            await update.message.reply_text(
+                f"⚠️ *Dashboard is already running*\n\n"
+                f"Started by: @{owner_username}\n"
+                f"Only one dashboard can run at a time.\n"
+                f"Ask them to stop it with /stop, or wait for it to finish."
+            )
+        else:
+            await update.message.reply_text(
+                "⚠️ *Dashboard is already running*\n\n"
+                "Another dashboard instance is active.\n"
+                "Only one dashboard can run at a time."
+            )
         return
     
     try:
@@ -413,6 +454,14 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             env=env
         )
         
+        # Track this user as the owner
+        username = user.username if user and user.username else "unknown"
+        dashboard_owners[user_id] = {
+            "process": dashboard_process,
+            "started_at": datetime.now(),
+            "username": username
+        }
+        
         # Wait a moment to check if process started
         time.sleep(2)
         
@@ -423,6 +472,9 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 f"❌ Failed to start dashboard:\n{stderr[:500]}"
             )
             dashboard_process = None
+            # Clean up owner tracking if process failed
+            if user_id and user_id in dashboard_owners:
+                del dashboard_owners[user_id]
             return
         
         # Wait for dashboard to be ready (check if port responds)
@@ -536,6 +588,9 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     f"❌ Dashboard process exited:\n{stderr[:500]}"
                 )
                 dashboard_process = None
+                # Clean up owner tracking if process failed
+                if user_id and user_id in dashboard_owners:
+                    del dashboard_owners[user_id]
                 return
             
             # Check if port is open and responding
@@ -642,6 +697,9 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 f"{'Error: ' + stderr[:200] if stderr else ''}"
             )
             dashboard_process = None
+            # Clean up owner tracking if process failed
+            if user_id and user_id in dashboard_owners:
+                del dashboard_owners[user_id]
         elif port_open:
             local_ip = _get_local_ip()
             access_urls = f"🌐 Local: http://127.0.0.1:{DASH_PORT}/\n"
@@ -674,14 +732,51 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     # Track user action
     log_user_action(update, "command", "/stop")
     
-    global dashboard_process
+    global dashboard_process, dashboard_owners
+    
+    user = update.effective_user
+    user_id = user.id if user else None
+    
+    if not user_id:
+        await update.message.reply_text("❌ Could not identify user.")
+        return
     
     stopped_any = False
     tracked_pid = None
     
-    # Get the tracked process PID before stopping it
-    if dashboard_process and dashboard_process.poll() is None:
-        tracked_pid = dashboard_process.pid
+    # Check if this user owns a running dashboard
+    user_owns_dashboard = False
+    if user_id in dashboard_owners:
+        owner_info = dashboard_owners[user_id]
+        dashboard_process = owner_info["process"]
+        if dashboard_process and dashboard_process.poll() is None:
+            tracked_pid = dashboard_process.pid
+            user_owns_dashboard = True
+    
+    # If user doesn't own a dashboard, check if any dashboard is running
+    if not user_owns_dashboard and _check_dashboard_running():
+        # Find who owns the running dashboard
+        running_owner = None
+        for uid, info in dashboard_owners.items():
+            if info["process"] and info["process"].poll() is None:
+                running_owner = info
+                break
+        
+        if running_owner:
+            owner_username = running_owner.get("username", "another user")
+            await update.message.reply_text(
+                f"⚠️ *You don't own the running dashboard*\n\n"
+                f"Started by: @{owner_username}\n"
+                f"Only the owner can stop it with /stop."
+            )
+            return
+        else:
+            await update.message.reply_text(
+                "⚠️ *Dashboard is running, but you don't own it*\n\n"
+                "The dashboard was started by another user or manually.\n"
+                "Only the owner can stop it."
+            )
+            return
     
     # Stop the tracked process if it exists
     if tracked_pid:
@@ -696,6 +791,9 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             logger.error(f"Error stopping tracked process: {e}")
         finally:
             dashboard_process = None
+            # Remove from owners dict
+            if user_id in dashboard_owners:
+                del dashboard_owners[user_id]
     
     # Also check for and stop manually started main.py processes
     import psutil
@@ -755,7 +853,10 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Track user action
     log_user_action(update, "command", "/status")
     
-    global dashboard_process, _processed_updates
+    global dashboard_process, _processed_updates, dashboard_owners
+    
+    user = update.effective_user
+    user_id = user.id if user else None
     
     # Prevent duplicate responses to the same update
     update_key = f"status_{update.update_id}"
@@ -768,8 +869,25 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if len(_processed_updates) > 100:
         _processed_updates = set(list(_processed_updates)[-50:])
     
-    # Check if our tracked process is running
-    bot_started = dashboard_process and dashboard_process.poll() is None
+    # Check if this user owns a running dashboard
+    user_owns_dashboard = False
+    if user_id and user_id in dashboard_owners:
+        owner_info = dashboard_owners[user_id]
+        dashboard_process = owner_info["process"]
+        user_owns_dashboard = dashboard_process and dashboard_process.poll() is None
+    
+    # Check if any dashboard is running
+    bot_started = dashboard_process and dashboard_process.poll() is None if user_owns_dashboard else False
+    any_dashboard_running = _check_dashboard_running()
+    
+    # Find who owns the running dashboard
+    running_owner = None
+    if any_dashboard_running:
+        for uid, info in dashboard_owners.items():
+            if info["process"] and info["process"].poll() is None:
+                running_owner = {"user_id": uid, "username": info.get("username", "unknown"), "started_at": info.get("started_at")}
+                dashboard_process = info["process"]
+                break
     
     # Also check if dashboard is running on the port (even if not started by bot)
     import socket
@@ -813,15 +931,30 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if local_ip:
             status_text += f"🌐 Network: http://{local_ip}:{DASH_PORT}/\n"
         
-        if bot_started:
+        # Show ownership information
+        if bot_started and user_owns_dashboard:
             status_text += f"📊 Process ID: {dashboard_process.pid}\n"
-            status_text += "🤖 Started by bot"
+            status_text += "✅ *Started by you*\n"
+            if running_owner and running_owner.get("started_at"):
+                started_time = running_owner["started_at"].strftime("%Y-%m-%d %H:%M:%S")
+                status_text += f"🕐 Started at: {started_time}\n"
             # Also show manually started processes if any
             if main_py_pids:
                 if len(main_py_pids) == 1:
                     status_text += f"\n⚠️ Also running (manual): PID {main_py_pids[0]}"
                 else:
                     status_text += f"\n⚠️ Also running (manual): PIDs {', '.join(map(str, main_py_pids))}"
+        elif running_owner and running_owner["user_id"] != user_id:
+            # Dashboard is running but owned by someone else
+            owner_username = running_owner.get("username", "another user")
+            status_text += f"👤 Started by: @{owner_username}\n"
+            if running_owner.get("started_at"):
+                started_time = running_owner["started_at"].strftime("%Y-%m-%d %H:%M:%S")
+                status_text += f"🕐 Started at: {started_time}\n"
+            status_text += "\n⚠️ *You don't own this dashboard*\n"
+            status_text += "💡 Only the owner can stop it with /stop"
+            if dashboard_process:
+                status_text += f"\n📊 Process ID: {dashboard_process.pid}"
         elif main_py_pids:
             # Show all PIDs if multiple, or just one
             if len(main_py_pids) == 1:
