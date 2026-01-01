@@ -755,8 +755,21 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     global dashboard_process, dashboard_owners
     
+    # Get user from effective_user, or from callback_query if available
     user = update.effective_user
+    # If effective_user is the bot itself (happens when called from button), get user from callback_query
+    if user and hasattr(user, 'is_bot') and user.is_bot:
+        if update.callback_query and update.callback_query.from_user:
+            user = update.callback_query.from_user
+            logger.debug(f"Stop command - got user from callback_query: {user.id} ({user.username})")
+        elif context and context.user_data and 'callback_query_user' in context.user_data:
+            user = context.user_data['callback_query_user']
+            # Clean up after use
+            del context.user_data['callback_query_user']
+            logger.debug(f"Stop command - got user from context: {user.id} ({user.username})")
+    
     user_id = user.id if user else None
+    logger.debug(f"Stop command - final user_id: {user_id} (type: {type(user_id)})")
     
     if not user_id:
         await update.message.reply_text("❌ Could not identify user.")
