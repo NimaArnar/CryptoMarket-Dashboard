@@ -185,17 +185,33 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         except:
             pass
         
-        if port_open:
+        # Check process status one more time
+        process_exited = dashboard_process.poll() is not None
+        if process_exited:
+            stderr = ""
+            try:
+                if dashboard_process.stderr:
+                    stderr = dashboard_process.stderr.read()
+            except:
+                pass
             await loading_msg.edit_text(
-                f"⚠️ Dashboard process started but may still be loading data.\n"
+                f"❌ Dashboard process exited unexpectedly.\n"
+                f"💡 Check the dashboard logs for errors.\n"
+                f"{'Error: ' + stderr[:200] if stderr else ''}"
+            )
+            dashboard_process = None
+        elif port_open:
+            await loading_msg.edit_text(
+                f"⚠️ Dashboard process is running but HTTP check timed out.\n"
                 f"🌐 Access at: http://127.0.0.1:{DASH_PORT}/\n"
-                f"💡 The page may take a few more moments to fully load.\n"
+                f"💡 The page may still be loading data. Try accessing it in your browser.\n"
                 f"⏱️ Waited {waited} seconds"
             )
         else:
             await loading_msg.edit_text(
-                f"❌ Dashboard process started but port is not responding.\n"
-                f"💡 Check the dashboard logs for errors."
+                f"❌ Dashboard process started but port {DASH_PORT} is not responding.\n"
+                f"💡 Check the dashboard logs for errors.\n"
+                f"⏱️ Waited {waited} seconds"
             )
             
     except Exception as e:
