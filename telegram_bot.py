@@ -268,14 +268,8 @@ def _load_data_manager() -> DataManager:
     """Load data manager (lazy loading)."""
     global data_manager
     if data_manager is None:
-        # Run data loading in executor to avoid event loop conflicts
-        import asyncio
-        import concurrent.futures
-        
-        loop = asyncio.get_event_loop()
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(_load_data_sync)
-            data_manager = future.result()
+        # Load data synchronously (this is called from executor, so no event loop needed)
+        data_manager = _load_data_sync()
     return data_manager
 
 
