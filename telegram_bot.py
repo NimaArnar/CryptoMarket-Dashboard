@@ -306,7 +306,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     
     elif data == "cmd_status":
+        # Create Update object - the message should have from_user from the original message
+        # But we'll ensure status_command gets the user from callback_query if needed
         cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        # Store the callback query user in context for status_command to use
+        context.user_data['callback_query_user'] = query.from_user
         await status_command(cmd_update, context)
         return
     
@@ -855,8 +859,21 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     global dashboard_process, _processed_updates, dashboard_owners
     
+    # Get user from effective_user, or from callback_query if available
     user = update.effective_user
+    # If effective_user is the bot itself (happens when called from button), get user from callback_query
+    if user and hasattr(user, 'is_bot') and user.is_bot:
+        if update.callback_query and update.callback_query.from_user:
+            user = update.callback_query.from_user
+            logger.debug(f"Got user from callback_query: {user.id} ({user.username})")
+        elif context and context.user_data and 'callback_query_user' in context.user_data:
+            user = context.user_data['callback_query_user']
+            # Clean up after use
+            del context.user_data['callback_query_user']
+            logger.debug(f"Got user from context: {user.id} ({user.username})")
+    
     user_id = user.id if user else None
+    logger.debug(f"Status command - final user_id: {user_id} (type: {type(user_id)})")
     
     # Prevent duplicate responses to the same update
     update_key = f"status_{update.update_id}"
