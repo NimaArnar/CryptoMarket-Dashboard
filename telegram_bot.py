@@ -75,12 +75,16 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     try:
         loading_msg = await update.message.reply_text("🔄 Starting dashboard...")
         
-        # Start dashboard in a separate process
+        # Start dashboard in a separate process with network access enabled
+        env = os.environ.copy()
+        env["DASH_HOST"] = "0.0.0.0"  # Allow access from other devices on network
+        
         dashboard_process = subprocess.Popen(
             ["python", "main.py"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            env=env
         )
         
         # Wait a moment to check if process started

@@ -46,7 +46,15 @@ def create_app(data_manager: DataManager) -> Dash:
 
 def run_app(app: Dash) -> None:
     """Run the Dash application."""
-    host = "0.0.0.0" if os.getenv("PORT") else "127.0.0.1"  # Use 0.0.0.0 for cloud deployment
+    # Allow binding to 0.0.0.0 for network access via DASH_HOST env var
+    # Default to 0.0.0.0 if PORT is set (cloud deployment), otherwise check DASH_HOST
+    if os.getenv("PORT"):
+        host = "0.0.0.0"
+    elif os.getenv("DASH_HOST"):
+        host = os.getenv("DASH_HOST")
+    else:
+        host = "127.0.0.1"  # Default to localhost only
+    
     startup_msg = f"Starting Dash… open http://{host}:{DASH_PORT}/"
     logger.info(startup_msg)
     # Log file path is set in utils.setup_logger
