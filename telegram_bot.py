@@ -742,59 +742,28 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /coins command - list all available coins."""
-    # Check if dashboard is running
-    if not _check_dashboard_running():
-        await update.message.reply_text(
-            "⚠️ *Dashboard is offline*\n\n"
-            "💡 The dashboard needs to be running to access data.\n"
-            "Use /run to start the dashboard first."
-        )
-        return
+    # Get coins directly from constants (no need to load data)
+    from src.constants import COINS, DOM_SYM
     
-    loading_msg = None
     try:
-        loading_msg = await update.message.reply_text("🔄 Loading data...")
-        import asyncio
-        loop = asyncio.get_event_loop()
-        dm = await loop.run_in_executor(None, _load_data_manager)
+        # Extract symbols and sort alphabetically
+        symbols = sorted([sym for _, sym, _, _ in COINS])
+        symbols.append(DOM_SYM)  # Add USDT.D
         
-        if not dm.symbols_all:
-            await update.message.reply_text("❌ No coins loaded. Try running the dashboard first.")
-            return
+        coins_text = f"💰 *Available Coins ({len(symbols)})*\n\n"
         
-        coins_text = f"📋 *Available Coins ({len(dm.symbols_all)})*\n\n"
+        # Format as a clean list (3 columns for better readability)
+        # Split into chunks of 3 for better formatting
+        for i in range(0, len(symbols), 3):
+            chunk = symbols[i:i+3]
+            coins_text += "  ".join(f"`{sym:8s}`" for sym in chunk) + "\n"
         
-        # Group by category
-        by_category = {}
-        for sym in dm.symbols_all:
-            if sym in dm.meta:
-                cat, _ = dm.meta[sym]
-                if cat not in by_category:
-                    by_category[cat] = []
-                by_category[cat].append(sym)
+        coins_text += f"\n💡 Use `/price <SYMBOL>` to get price info"
         
-        for cat, symbols in sorted(by_category.items()):
-            coins_text += f"*{cat}:*\n"
-            coins_text += ", ".join(symbols) + "\n\n"
-        
-        # Split if too long (Telegram has 4096 char limit)
-        if len(coins_text) > 4000:
-            coins_text = coins_text[:4000] + "\n... (truncated)"
-        
-        if loading_msg:
-            try:
-                await loading_msg.delete()
-            except:
-                pass
         await update.message.reply_text(coins_text, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error listing coins: {e}")
-        if loading_msg:
-            try:
-                await loading_msg.delete()
-            except:
-                pass
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
