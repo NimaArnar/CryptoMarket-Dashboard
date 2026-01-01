@@ -1,5 +1,8 @@
 """Telegram bot for Crypto Market Dashboard control."""
+import asyncio
+import http.client
 import os
+import socket
 import subprocess
 import threading
 import time
