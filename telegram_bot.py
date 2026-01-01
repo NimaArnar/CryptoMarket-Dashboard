@@ -493,7 +493,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 def _load_data_manager() -> DataManager:
-    """Load data manager (lazy loading)."""
+    """Load data manager (lazy loading with caching)."""
     global data_manager
     if data_manager is None:
         # Load data synchronously (this is called from executor, so no event loop needed)
@@ -506,6 +506,54 @@ def _load_data_sync() -> DataManager:
     dm = DataManager()
     dm.load_all_data()
     return dm
+
+
+def _load_single_coin_data(symbol: str) -> tuple:
+    """Load data for a single coin only (faster for price/marketcap commands)."""
+    from src.config import CACHE_DIR, DAYS_HISTORY, VS_CURRENCY
+    from src.constants import COINS
+    from src.data.fetcher import fetch_market_caps_retry
+    import json
+    
+    # Find the coin_id for this symbol
+    coin_id = None
+    cat = None
+    grp = None
+    for cid, sym, c, g in COINS:
+        if sym.upper() == symbol.upper():
+            coin_id = cid
+            cat = c
+            grp = g
+            break
+    
+    if not coin_id:
+        return None, None, None
+    
+    # Load market cap data
+    try:
+        mc_series = fetch_market_caps_retry(coin_id)
+    except Exception as e:
+        logger.error(f"Failed to load market cap for {symbol}: {e}")
+        return None, None, None
+    
+    # Load price data from cache
+    price_series = None
+    cache_path = CACHE_DIR / f"{coin_id}_{DAYS_HISTORY}d_{VS_CURRENCY}.json"
+    if cache_path.exists():
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                js = json.load(f)
+            
+            if "prices" in js and js["prices"]:
+                import pandas as pd
+                df_prices = pd.DataFrame(js["prices"], columns=["ts", "price"])
+                df_prices["date"] = pd.to_datetime(df_prices["ts"], unit="ms").dt.floor("D")
+                df_prices = df_prices.sort_values("ts").groupby("date", as_index=False).last()
+                price_series = df_prices.set_index("date")["price"].sort_index()
+        except Exception as e:
+            logger.debug(f"Failed to load price data for {symbol}: {e}")
+    
+    return mc_series, price_series, (cat, grp)
 
 
 def _check_dashboard_running() -> bool:
@@ -564,30 +612,25 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     loading_msg = None
     
     try:
-        # Load data in executor to avoid blocking
+        # Load only this coin's data (much faster than loading all coins)
         import asyncio
         loop = asyncio.get_event_loop()
-        dm = await loop.run_in_executor(None, _load_data_manager)
+        mc_series, price_series, meta = await loop.run_in_executor(None, _load_single_coin_data, symbol)
         
-        if symbol not in dm.series:
+        if mc_series is None:
             await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
             return
         
-        # Get latest market cap and calculate price
-        series = dm.series[symbol]
-        latest_mc = series.iloc[-1]
-        latest_date = series.index[-1]
-        
-        # Load price data if available
-        from src.app.callbacks import _load_price_data
-        prices_dict = _load_price_data()
+        # Get latest market cap
+        latest_mc = mc_series.iloc[-1]
+        latest_date = mc_series.index[-1]
         
         latest_price = None
         change_24h = None
         change_emoji = ""
         
-        if symbol in prices_dict:
-            price_series = prices_dict[symbol].dropna()
+        if price_series is not None:
+            price_series = price_series.dropna()
             if not price_series.empty:
                 latest_price = price_series.iloc[-1]
                 # Calculate 24h change if possible
@@ -596,28 +639,14 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                     change_24h = ((latest_price - prev_price) / prev_price) * 100
                     change_emoji = "📈" if change_24h >= 0 else "📉"
         
-        # If no price data, calculate from market cap and Q supply
+        # If no price data, show market cap only
         if latest_price is None:
-            # Try to calculate from market cap / Q supply
-            if dm.df_raw is not None and symbol in dm.df_raw.columns:
-                latest_mc_from_df = dm.df_raw[symbol].iloc[-1]
-                # Q supply = MC / Price, so Price = MC / Q
-                # We need to get Q from somewhere or estimate
-                latest_price = latest_mc_from_df / 1_000_000  # Rough estimate
-                price_text = (
-                    f"💰 *{symbol} Price*\n\n"
-                    f"💵 Estimated Price: ${latest_price:,.2f}\n"
-                    f"💎 Market Cap: ${latest_mc:,.0f}\n"
-                    f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n"
-                    f"⚠️ Note: Price estimated from market cap\n"
-                )
-            else:
-                price_text = (
-                    f"💰 *{symbol} Price*\n\n"
-                    f"💎 Market Cap: ${latest_mc:,.0f}\n"
-                    f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n"
-                    f"❌ Price data not available\n"
-                )
+            price_text = (
+                f"💰 *{symbol} Price*\n\n"
+                f"💎 Market Cap: ${latest_mc:,.0f}\n"
+                f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n"
+                f"❌ Price data not available\n"
+            )
         else:
             price_text = (
                 f"💰 *{symbol} Price*\n\n"
@@ -629,8 +658,8 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             if change_24h is not None:
                 price_text += f"{change_emoji} 24h Change: {change_24h:+.2f}%\n"
         
-        if symbol in dm.meta:
-            cat, grp = dm.meta[symbol]
+        if meta:
+            cat, grp = meta
             price_text += f"📂 Category: {cat}\n"
         
         # Delete loading message and send result
