@@ -100,9 +100,103 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         
         import socket
         import http.client
-        max_wait = 120  # Maximum wait time in seconds (2 minutes for data loading)
-        wait_interval = 3  # Check every 3 seconds
+        import threading
+        import queue
+        
+        max_wait = 480  # Maximum wait time in seconds (8 minutes for data loading)
+        wait_interval = 2  # Check every 2 seconds
         waited = 0
+        
+        # Queue to collect log lines
+        log_queue = queue.Queue()
+        last_progress = "Starting..."
+        coins_fetched = set()
+        current_batch = None
+        total_batches = None
+        
+        # Function to read logs in background
+        def read_logs():
+            nonlocal last_progress, coins_fetched, current_batch, total_batches
+            try:
+                # Read from both stdout and stderr
+                import select
+                import sys
+                
+                # On Windows, we need to use a different approach
+                import queue as q
+                import threading
+                
+                def read_stream(stream, stream_name):
+                    try:
+                        for line in iter(stream.readline, ''):
+                            if not line:
+                                break
+                            line = line.strip()
+                            if line:
+                                log_queue.put((stream_name, line))
+                    except:
+                        pass
+                
+                # Start threads to read stdout and stderr
+                stdout_thread = threading.Thread(target=read_stream, args=(dashboard_process.stdout, 'stdout'), daemon=True)
+                stderr_thread = threading.Thread(target=read_stream, args=(dashboard_process.stderr, 'stderr'), daemon=True)
+                stdout_thread.start()
+                stderr_thread.start()
+                
+                # Process log lines
+                while dashboard_process.poll() is None:
+                    try:
+                        stream_name, line = log_queue.get(timeout=0.5)
+                        
+                        # Parse progress information
+                        if "Starting data fetch" in line:
+                            last_progress = "🔄 Starting data fetch..."
+                        elif "Fetching batch" in line:
+                            # Extract batch info: "Fetching batch 1/5 (5 coins)"
+                            import re
+                            match = re.search(r'batch (\d+)/(\d+)', line)
+                            if match:
+                                current_batch = int(match.group(1))
+                                total_batches = int(match.group(2))
+                                last_progress = f"📦 Fetching batch {current_batch}/{total_batches}"
+                        elif "Fetching" in line and "(" in line:
+                            # Extract coin: "Fetching BTC (bitcoin)"
+                            import re
+                            match = re.search(r'Fetching (\w+)', line)
+                            if match:
+                                coin = match.group(1)
+                                coins_fetched.add(coin)
+                                last_progress = f"💰 Fetching {coin}... ({len(coins_fetched)} coins)"
+                        elif "Successfully fetched and cached" in line:
+                            # Extract coin: "bitcoin: Successfully fetched and cached data"
+                            import re
+                            match = re.search(r'(\w+): Successfully fetched', line)
+                            if match:
+                                coin_id = match.group(1)
+                                last_progress = f"✅ Fetched {coin_id} ({len(coins_fetched)} coins)"
+                        elif "Successfully loaded" in line:
+                            # Extract coin: "✅ Successfully loaded BTC"
+                            import re
+                            match = re.search(r'loaded (\w+)', line)
+                            if match:
+                                coin = match.group(1)
+                                last_progress = f"✅ Loaded {coin} ({len(coins_fetched)} coins)"
+                        elif "Using sequential fetching" in line:
+                            last_progress = "🔄 Using sequential fetching..."
+                        elif "HTTP 429" in line:
+                            last_progress = "⏳ Rate limited, waiting..."
+                        elif "Creating app" in line or "Starting server" in line:
+                            last_progress = "🚀 Starting web server..."
+                    except queue.Empty:
+                        continue
+                    except Exception as e:
+                        logger.debug(f"Error processing log: {e}")
+            except Exception as e:
+                logger.debug(f"Error reading logs: {e}")
+        
+        # Start log reading thread
+        log_thread = threading.Thread(target=read_logs, daemon=True)
+        log_thread.start()
         
         while waited < max_wait:
             # Check if process is still running
@@ -168,6 +262,19 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 # Socket connection error - keep waiting
                 logger.debug(f"Socket check failed (will retry): {e}")
                 pass
+            
+            # Update progress message with latest log info
+            progress_text = f"🔄 Starting dashboard...\n⏳ {last_progress}\n"
+            if coins_fetched:
+                progress_text += f"📊 Progress: {len(coins_fetched)} coins fetched\n"
+            if current_batch and total_batches:
+                progress_text += f"📦 Batch {current_batch}/{total_batches}\n"
+            progress_text += f"⏱️ Elapsed: {waited}s"
+            
+            try:
+                await loading_msg.edit_text(progress_text)
+            except:
+                pass  # Message might be too long or edit failed
             
             # Wait before next check
             await asyncio.sleep(wait_interval)
