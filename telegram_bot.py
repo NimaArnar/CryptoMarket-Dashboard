@@ -883,12 +883,22 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 break
     
     # Check if this user owns the running dashboard
+    # Only true if the running owner is the current user
     user_owns_dashboard = False
     user_process = None
-    if user_id and user_id in dashboard_owners:
+    if running_owner and running_owner["user_id"] == user_id:
+        # Current user owns the running dashboard
+        user_owns_dashboard = True
+        user_process = running_process
+    elif user_id and user_id in dashboard_owners:
+        # User has a dashboard entry, but it's not the one running
         owner_info = dashboard_owners[user_id]
         user_process = owner_info["process"]
-        user_owns_dashboard = user_process and user_process.poll() is None
+        # Check if their process is still running (might be stale)
+        if user_process and user_process.poll() is not None:
+            # Process is dead, remove from owners
+            del dashboard_owners[user_id]
+            user_process = None
     
     # Determine if the current user owns the running dashboard
     bot_started = user_owns_dashboard and (running_owner is not None and running_owner["user_id"] == user_id)
@@ -941,10 +951,11 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             status_text += f"🌐 Network: http://{local_ip}:{DASH_PORT}/\n"
         
         # Show ownership information
-        if user_owns_dashboard and running_owner and running_owner["user_id"] == user_id:
+        # Only show "Started by you" if running_owner exists and matches current user
+        if running_owner and running_owner["user_id"] == user_id:
             # User owns the running dashboard
-            if user_process:
-                status_text += f"📊 Process ID: {user_process.pid}\n"
+            if running_process:
+                status_text += f"📊 Process ID: {running_process.pid}\n"
             status_text += "✅ *Started by you*\n"
             if running_owner.get("started_at"):
                 started_time = running_owner["started_at"].strftime("%Y-%m-%d %H:%M:%S")
