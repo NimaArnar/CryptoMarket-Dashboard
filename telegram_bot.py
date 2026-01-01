@@ -28,7 +28,8 @@ dashboard_thread: Optional[threading.Thread] = None
 data_manager: Optional[DataManager] = None
 
 # Telegram Bot Token (set via environment variable)
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+# Strip whitespace to prevent issues with accidental spaces
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 
 
 def create_main_keyboard() -> InlineKeyboardMarkup:
@@ -1284,6 +1285,12 @@ async def main_async() -> None:
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN environment variable is not set!")
         logger.error("Please set it with: export TELEGRAM_BOT_TOKEN='your-token'")
+        return
+    
+    # Validate token format (should be numeric:alphanumeric)
+    if ":" not in TELEGRAM_BOT_TOKEN:
+        logger.error("Invalid token format! Token should be in format: '123456789:ABCdefGHIjklMNOpqrsTUVwxyz'")
+        logger.error("Make sure there are no extra spaces in the token.")
         return
     
     # Check if another instance is running
