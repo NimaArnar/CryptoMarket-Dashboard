@@ -7,13 +7,22 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Optional
+from typing import Optional, Tuple
+import pandas as pd
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 from telegram.error import Conflict, TimedOut, NetworkError
 
-from src.config import DASH_PORT, PROJECT_ROOT
+from src.config import (
+    DASH_PORT, 
+    PROJECT_ROOT,
+    BOT_MAX_DASHBOARD_WAIT,
+    BOT_WAIT_INTERVAL,
+    BOT_PROCESSED_UPDATES_MAX,
+    BOT_MAX_MESSAGE_LENGTH,
+    BOT_COINS_PER_PAGE
+)
 from src.data_manager import DataManager
 from src.utils import setup_logger
 
@@ -80,6 +89,9 @@ LOCK_FILE = PROJECT_ROOT / ".telegram_bot.lock"
 dashboard_process: Optional[subprocess.Popen] = None
 dashboard_thread: Optional[threading.Thread] = None
 data_manager: Optional[DataManager] = None
+
+# Lock for dashboard operations to prevent race conditions
+dashboard_lock = asyncio.Lock()
 
 # Track which user started the dashboard (user_id -> process info)
 dashboard_owners: dict[int, dict] = {}  # user_id -> {"process": Popen, "started_at": datetime, "username": str}
@@ -376,7 +388,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """Handle /help command."""
     # Track user action
     log_user_action(update, "command", "/help")
-    """Handle /help command."""
     help_text = (
         "📚 *Help - Crypto Market Dashboard Bot*\n\n"
         "📊 *Dashboard Control:*\n"
@@ -425,40 +436,42 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("❌ Could not identify user.")
         return
     
-    # Check if this user already has a dashboard running
-    if user_id in dashboard_owners:
-        owner_info = dashboard_owners[user_id]
-        if owner_info["process"] and owner_info["process"].poll() is None:
-            await update.message.reply_text(
-                "⚠️ *You already have a dashboard running!*\n\n"
-                "Use /stop to stop your dashboard first."
-            )
-            return
-    
-    # Check if any dashboard is running (port check)
-    if _check_dashboard_running():
-        # Find who started it
-        running_owner = None
-        for uid, info in dashboard_owners.items():
-            if info["process"] and info["process"].poll() is None:
-                running_owner = info
-                break
+    # Use lock to prevent race conditions
+    async with dashboard_lock:
+        # Check if this user already has a dashboard running
+        if user_id in dashboard_owners:
+            owner_info = dashboard_owners[user_id]
+            if owner_info["process"] and owner_info["process"].poll() is None:
+                await update.message.reply_text(
+                    "⚠️ *You already have a dashboard running!*\n\n"
+                    "Use /stop to stop your dashboard first."
+                )
+                return
         
-        if running_owner:
-            owner_username = running_owner.get("username", "another user")
-            await update.message.reply_text(
-                f"⚠️ *Dashboard is already running*\n\n"
-                f"Started by: @{owner_username}\n"
-                f"Only one dashboard can run at a time.\n"
-                f"Ask them to stop it with /stop, or wait for it to finish."
-            )
-        else:
-            await update.message.reply_text(
-                "⚠️ *Dashboard is already running*\n\n"
-                "Another dashboard instance is active.\n"
-                "Only one dashboard can run at a time."
-            )
-        return
+        # Check if any dashboard is running (port check)
+        if _check_dashboard_running():
+            # Find who started it
+            running_owner = None
+            for uid, info in dashboard_owners.items():
+                if info["process"] and info["process"].poll() is None:
+                    running_owner = info
+                    break
+            
+            if running_owner:
+                owner_username = running_owner.get("username", "another user")
+                await update.message.reply_text(
+                    f"⚠️ *Dashboard is already running*\n\n"
+                    f"Started by: @{owner_username}\n"
+                    f"Only one dashboard can run at a time.\n"
+                    f"Ask them to stop it with /stop, or wait for it to finish."
+                )
+            else:
+                await update.message.reply_text(
+                    "⚠️ *Dashboard is already running*\n\n"
+                    "Another dashboard instance is active.\n"
+                    "Only one dashboard can run at a time."
+                )
+            return
     
     try:
         loading_msg = await update.message.reply_text("🔄 Starting dashboard...")
@@ -506,8 +519,8 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         import threading
         import queue
         
-        max_wait = 480  # Maximum wait time in seconds (8 minutes for data loading)
-        wait_interval = 2  # Check every 2 seconds
+        max_wait = BOT_MAX_DASHBOARD_WAIT  # Maximum wait time in seconds (8 minutes for data loading)
+        wait_interval = BOT_WAIT_INTERVAL  # Check every 2 seconds
         waited = 0
         
         # Queue to collect log lines
@@ -537,7 +550,8 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                             line = line.strip()
                             if line:
                                 log_queue.put((stream_name, line))
-                    except:
+                    except (OSError, IOError, ValueError) as e:
+                        logger.debug(f"Error reading stream {stream_name}: {e}")
                         pass
                 
                 # Start threads to read stdout and stderr
@@ -684,7 +698,8 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             
             try:
                 await loading_msg.edit_text(progress_text)
-            except:
+            except Exception as e:
+                logger.debug(f"Could not edit loading message: {e}")
                 pass  # Message might be too long or edit failed
             
             # Wait before next check
@@ -700,7 +715,8 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             result = sock.connect_ex(('127.0.0.1', DASH_PORT))
             port_open = (result == 0)
             sock.close()
-        except:
+        except (OSError, socket.error) as e:
+            logger.debug(f"Socket check error: {e}")
             pass
         
         # Check process status one more time
@@ -710,7 +726,8 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             try:
                 if dashboard_process.stderr:
                     stderr = dashboard_process.stderr.read()
-            except:
+            except (OSError, IOError) as e:
+                logger.debug(f"Error reading stderr: {e}")
                 pass
             await loading_msg.edit_text(
                 f"❌ Dashboard process exited unexpectedly.\n"
@@ -867,7 +884,8 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             result = sock.connect_ex(('127.0.0.1', DASH_PORT))
             port_in_use = (result == 0)
             sock.close()
-        except:
+        except (OSError, socket.error) as e:
+            logger.debug(f"Socket check error: {e}")
             pass
         
         if port_in_use:
@@ -879,8 +897,9 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await update.message.reply_text("⚠️ Dashboard is not running!")
 
 
-# Track processed updates to prevent duplicates (use set to handle multiple instances)
-_processed_updates = set()
+# Track processed updates to prevent duplicates (use deque with maxlen for automatic cleanup)
+from collections import deque
+_processed_updates: deque = deque(maxlen=BOT_PROCESSED_UPDATES_MAX)
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /status command - check dashboard status."""
@@ -910,11 +929,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if update_key in _processed_updates:
         logger.warning(f"Ignoring duplicate status command for update_id {update.update_id}")
         return
-    _processed_updates.add(update_key)
-    
-    # Clean up old entries (keep only last 100)
-    if len(_processed_updates) > 100:
-        _processed_updates = set(list(_processed_updates)[-50:])
+    _processed_updates.append(update_key)
     
     # Check if any dashboard is running
     any_dashboard_running = _check_dashboard_running()
@@ -1080,7 +1095,7 @@ def _load_data_sync() -> DataManager:
     return dm
 
 
-def _get_local_ip() -> str:
+def _get_local_ip() -> Optional[str]:
     """Get the local IP address for network access."""
     try:
         import socket
@@ -1100,7 +1115,7 @@ def _get_local_ip() -> str:
         return None
 
 
-def _load_single_coin_data(symbol: str) -> tuple:
+def _load_single_coin_data(symbol: str) -> Tuple[Optional[pd.Series], Optional[pd.Series], Optional[Tuple[str, str]]]:
     """Load data for a single coin only (faster for price/marketcap commands)."""
     from src.config import CACHE_DIR, DAYS_HISTORY, VS_CURRENCY
     from src.constants import COINS
@@ -1146,6 +1161,13 @@ def _load_single_coin_data(symbol: str) -> tuple:
             logger.debug(f"Failed to load price data for {symbol}: {e}")
     
     return mc_series, price_series, (cat, grp)
+
+
+def validate_symbol(symbol: str) -> bool:
+    """Validate coin symbol format."""
+    import re
+    # Allow alphanumeric characters, 1-10 characters long
+    return bool(re.match(r'^[A-Z0-9]{1,10}$', symbol.upper()))
 
 
 def _check_dashboard_running() -> bool:
@@ -1195,6 +1217,17 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text("❌ Please specify a coin symbol. Example: /price BTC")
         return
     
+    symbol = context.args[0].upper()
+    
+    # Validate symbol format
+    if not validate_symbol(symbol):
+        await update.message.reply_text(
+            "❌ Invalid symbol format.\n\n"
+            "💡 Symbol must be 1-10 alphanumeric characters.\n"
+            "Example: BTC, ETH, DOGE"
+        )
+        return
+    
     # Check if dashboard is running
     if not _check_dashboard_running():
         await update.message.reply_text(
@@ -1203,8 +1236,6 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "Use /run to start the dashboard first."
         )
         return
-    
-    symbol = context.args[0].upper()
     loading_msg = None
     
     try:
@@ -1262,7 +1293,8 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if loading_msg:
             try:
                 await loading_msg.delete()
-            except:
+            except Exception as e:
+                logger.debug(f"Could not delete loading message: {e}")
                 pass
         await update.message.reply_text(price_text, parse_mode="Markdown")
         
@@ -1271,7 +1303,8 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if loading_msg:
             try:
                 await loading_msg.delete()
-            except:
+            except Exception as e:
+                logger.debug(f"Could not delete loading message: {e}")
                 pass
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
@@ -1286,6 +1319,17 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("❌ Please specify a coin symbol. Example: /marketcap BTC")
         return
     
+    symbol = context.args[0].upper()
+    
+    # Validate symbol format
+    if not validate_symbol(symbol):
+        await update.message.reply_text(
+            "❌ Invalid symbol format.\n\n"
+            "💡 Symbol must be 1-10 alphanumeric characters.\n"
+            "Example: BTC, ETH, DOGE"
+        )
+        return
+    
     # Check if dashboard is running
     if not _check_dashboard_running():
         await update.message.reply_text(
@@ -1294,8 +1338,6 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             "Use /run to start the dashboard first."
         )
         return
-    
-    symbol = context.args[0].upper()
     loading_msg = None
     
     try:
@@ -1326,7 +1368,8 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if loading_msg:
             try:
                 await loading_msg.delete()
-            except:
+            except Exception as e:
+                logger.debug(f"Could not delete loading message: {e}")
                 pass
         await update.message.reply_text(mc_text, parse_mode="Markdown")
             
@@ -1335,7 +1378,8 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if loading_msg:
             try:
                 await loading_msg.delete()
-            except:
+            except Exception as e:
+                logger.debug(f"Could not delete loading message: {e}")
                 pass
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
@@ -1432,19 +1476,59 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if len(dm.symbols_all) > 10:
             latest_text += f"\n... and {len(dm.symbols_all) - 10} more coins"
         
-        if loading_msg:
-            try:
-                await loading_msg.delete()
-            except:
-                pass
-        await update.message.reply_text(latest_text, parse_mode="Markdown")
+        # Check message length and split if needed
+        if len(latest_text) > BOT_MAX_MESSAGE_LENGTH:
+            # Split into multiple messages
+            messages = []
+            current_msg = f"📊 *Latest Prices*\n📅 Date: {dm.df_raw.index[-1].strftime('%Y-%m-%d')}\n\n"
+            
+            for sym in symbols_to_show:
+                line = ""
+                if sym in prices_dict:
+                    price_series = prices_dict[sym].dropna()
+                    if not price_series.empty:
+                        price = price_series.iloc[-1]
+                        line = f"💰 {sym}: ${price:,.2f}\n"
+                    elif sym in dm.series:
+                        mc = dm.series[sym].iloc[-1]
+                        line = f"💎 {sym}: MC ${mc:,.0f}\n"
+                elif sym in dm.series:
+                    mc = dm.series[sym].iloc[-1]
+                    line = f"💎 {sym}: MC ${mc:,.0f}\n"
+                
+                if len(current_msg) + len(line) > BOT_MAX_MESSAGE_LENGTH:
+                    messages.append(current_msg)
+                    current_msg = line
+                else:
+                    current_msg += line
+            
+            if current_msg:
+                messages.append(current_msg)
+            
+            if loading_msg:
+                try:
+                    await loading_msg.delete()
+                except Exception:
+                    pass
+            
+            # Send all messages
+            for msg in messages:
+                await update.message.reply_text(msg, parse_mode="Markdown")
+        else:
+            if loading_msg:
+                try:
+                    await loading_msg.delete()
+                except Exception:
+                    pass
+            await update.message.reply_text(latest_text, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error getting latest prices: {e}")
         if loading_msg:
             try:
                 await loading_msg.delete()
-            except:
+            except Exception as e:
+                logger.debug(f"Could not delete loading message: {e}")
                 pass
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
@@ -1459,6 +1543,17 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("❌ Please specify a coin symbol. Example: /info BTC")
         return
     
+    symbol = context.args[0].upper()
+    
+    # Validate symbol format
+    if not validate_symbol(symbol):
+        await update.message.reply_text(
+            "❌ Invalid symbol format.\n\n"
+            "💡 Symbol must be 1-10 alphanumeric characters.\n"
+            "Example: BTC, ETH, DOGE"
+        )
+        return
+    
     # Check if dashboard is running
     if not _check_dashboard_running():
         await update.message.reply_text(
@@ -1467,8 +1562,6 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "Use /run to start the dashboard first."
         )
         return
-    
-    symbol = context.args[0].upper()
     loading_msg = None
     
     try:
@@ -1514,7 +1607,8 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if loading_msg:
             try:
                 await loading_msg.delete()
-            except:
+            except Exception as e:
+                logger.debug(f"Could not delete loading message: {e}")
                 pass
         await update.message.reply_text(info_text, parse_mode="Markdown")
         
@@ -1523,7 +1617,8 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if loading_msg:
             try:
                 await loading_msg.delete()
-            except:
+            except Exception as e:
+                logger.debug(f"Could not delete loading message: {e}")
                 pass
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
@@ -1619,6 +1714,13 @@ async def main_async() -> None:
     import atexit
     atexit.register(remove_lock)
     
+    # Clean up stale dashboard owners on startup
+    global dashboard_owners
+    for user_id, info in list(dashboard_owners.items()):
+        if info["process"] and info["process"].poll() is not None:
+            logger.info(f"Cleaning up stale dashboard entry for user {user_id}")
+            del dashboard_owners[user_id]
+    
     # Delete any existing webhook to ensure clean polling state
     from telegram import Bot
     from telegram.error import TimedOut, NetworkError
@@ -1638,7 +1740,8 @@ async def main_async() -> None:
         finally:
             try:
                 await bot.close()
-            except:
+            except Exception as e:
+                logger.debug(f"Error closing bot: {e}")
                 pass
     except Exception as e:
         logger.warning(f"Could not initialize bot for webhook check: {e}. Continuing anyway...")
