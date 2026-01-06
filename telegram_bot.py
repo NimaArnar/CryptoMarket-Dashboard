@@ -117,9 +117,6 @@ def create_main_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("⚡ Quick Actions", callback_data="menu_quick")
         ],
         [
-            InlineKeyboardButton("ℹ️ What's this bot for?", callback_data="about")
-        ],
-        [
             InlineKeyboardButton("❓ Help", callback_data="help")
         ]
     ]
@@ -137,6 +134,9 @@ def create_help_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("⚡ Quick Actions", callback_data="menu_quick")
+        ],
+        [
+            InlineKeyboardButton("ℹ️ What's this bot for?", callback_data="about")
         ],
         [
             InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
@@ -303,39 +303,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     elif data == "about":
         # Show bot information and purpose
-        about_text = (
-            "🤖 *Crypto Market Dashboard Bot*\n\n"
-            "This bot allows you to:\n"
-            "• Control your dashboard server remotely\n"
-            "• Get real-time cryptocurrency prices\n"
-            "• View market cap data\n"
-            "• Access detailed coin information\n"
-            "• Monitor dashboard status\n\n"
-            "📊 *Dashboard Control:*\n"
-            "Start, stop, restart, and check status of your dashboard server.\n\n"
-            "💰 *Data Queries:*\n"
-            "Get prices, market caps, and information for 25+ cryptocurrencies.\n\n"
-            "🌐 *Network Access:*\n"
-            "Access your dashboard from any device on your network.\n\n"
-            "💡 *Getting Started:*\n"
-            "Use /start to see the main menu, or /help for command list."
-        )
-        # Edit the existing message instead of deleting and sending new
-        try:
-            await query.edit_message_text(
-                text=about_text,
-                parse_mode="Markdown",
-                reply_markup=create_main_keyboard()
-            )
-        except Exception as e:
-            logger.debug(f"Could not edit message, sending new: {e}")
-            # Fallback: if edit fails, send new message
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=about_text,
-                parse_mode="Markdown",
-                reply_markup=create_main_keyboard()
-            )
+        # Edit the existing message instead of sending new
+        await about_command_edit(query, context)
         return
     
     elif data == "help":
@@ -512,6 +481,72 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     except Exception as e:
         logger.error(f"telegram_bot - Error sending /start message: {e}")
         raise
+
+
+async def about_command_edit(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle about button by editing existing message."""
+    about_text = (
+        "🤖 *Crypto Market Dashboard Bot*\n\n"
+        "This bot allows you to:\n"
+        "• Control your dashboard server remotely\n"
+        "• Get real-time cryptocurrency prices\n"
+        "• View market cap data\n"
+        "• Access detailed coin information\n"
+        "• Monitor dashboard status\n\n"
+        "📊 *Dashboard Control:*\n"
+        "Start, stop, restart, and check status of your dashboard server.\n\n"
+        "💰 *Data Queries:*\n"
+        "Get prices, market caps, and information for 25+ cryptocurrencies.\n\n"
+        "🌐 *Network Access:*\n"
+        "Access your dashboard from any device on your network.\n\n"
+        "💡 *Getting Started:*\n"
+        "Use /start to see the main menu, or /help for command list."
+    )
+    # Edit the existing message instead of sending new
+    try:
+        await query.edit_message_text(
+            text=about_text,
+            parse_mode="Markdown",
+            reply_markup=create_help_keyboard()
+        )
+    except Exception as e:
+        logger.debug(f"Could not edit message, sending new: {e}")
+        # Fallback: if edit fails, send new message
+        chat_id = query.message.chat_id
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=about_text,
+            parse_mode="Markdown",
+            reply_markup=create_help_keyboard()
+        )
+
+
+async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /about command."""
+    # Track user action
+    log_user_action(update, "command", "/about")
+    about_text = (
+        "🤖 *Crypto Market Dashboard Bot*\n\n"
+        "This bot allows you to:\n"
+        "• Control your dashboard server remotely\n"
+        "• Get real-time cryptocurrency prices\n"
+        "• View market cap data\n"
+        "• Access detailed coin information\n"
+        "• Monitor dashboard status\n\n"
+        "📊 *Dashboard Control:*\n"
+        "Start, stop, restart, and check status of your dashboard server.\n\n"
+        "💰 *Data Queries:*\n"
+        "Get prices, market caps, and information for 25+ cryptocurrencies.\n\n"
+        "🌐 *Network Access:*\n"
+        "Access your dashboard from any device on your network.\n\n"
+        "💡 *Getting Started:*\n"
+        "Use /start to see the main menu, or /help for command list."
+    )
+    await update.message.reply_text(
+        about_text,
+        parse_mode="Markdown",
+        reply_markup=create_help_keyboard()
+    )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2186,6 +2221,7 @@ async def main_async() -> None:
         commands = [
             BotCommand("start", "Start the bot and show main menu"),
             BotCommand("help", "Show help and available commands"),
+            BotCommand("about", "Learn what this bot does and its features"),
             BotCommand("run", "Start the dashboard server"),
             BotCommand("stop", "Stop the dashboard server"),
             BotCommand("restart", "Restart the dashboard server"),
@@ -2221,6 +2257,7 @@ async def main_async() -> None:
     # Register command handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("about", about_command))
     application.add_handler(CommandHandler("run", run_command))
     application.add_handler(CommandHandler("stop", stop_command))
     application.add_handler(CommandHandler("restart", restart_command))
