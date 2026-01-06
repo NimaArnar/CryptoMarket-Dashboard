@@ -133,6 +133,9 @@ def create_dashboard_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("⏹️ Stop Dashboard", callback_data="cmd_stop")
         ],
         [
+            InlineKeyboardButton("🔄 Restart Dashboard", callback_data="cmd_restart")
+        ],
+        [
             InlineKeyboardButton("📊 Status", callback_data="cmd_status")
         ],
         [
@@ -287,6 +290,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "📊 *Dashboard Control:*\n"
             "*/run* - Start the dashboard server\n"
             "*/stop* - Stop the dashboard server\n"
+            "*/restart* - Restart the dashboard server\n"
             "*/status* - Check if dashboard is running\n\n"
             "💰 *Data Queries:*\n"
             "*/price <SYMBOL>* - Get latest price (e.g., /price BTC)\n"
@@ -322,6 +326,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Store the callback query user in context for stop_command to use
         context.user_data['callback_query_user'] = query.from_user
         await stop_command(cmd_update, context)
+        return
+    
+    elif data == "cmd_restart":
+        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        # Store the callback query user in context for restart_command to use
+        context.user_data['callback_query_user'] = query.from_user
+        await restart_command(cmd_update, context)
         return
     
     elif data == "cmd_status":
@@ -373,7 +384,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "🤖 *Crypto Market Dashboard Bot*\n\n"
         "Welcome! Use the buttons below to control your dashboard and get crypto data.\n\n"
         "You can also use commands directly:\n"
-        "/run, /stop, /status, /price, /marketcap, /coins, /latest, /info, /help"
+        "/run, /stop, /restart, /status, /price, /marketcap, /coins, /latest, /info, /help"
     )
     
     keyboard = create_main_keyboard()
@@ -404,6 +415,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "📊 *Dashboard Control:*\n"
         "*/run* - Start the dashboard server\n"
         "*/stop* - Stop the dashboard server\n"
+        "*/restart* - Restart the dashboard server\n"
         "*/status* - Check if dashboard is running\n\n"
         "💰 *Data Queries:*\n"
         "*/price <SYMBOL>* - Get latest price (e.g., /price BTC)\n"
@@ -911,6 +923,92 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 # Track processed updates to prevent duplicates (use deque with maxlen for automatic cleanup)
 from collections import deque
 _processed_updates: deque = deque(maxlen=BOT_PROCESSED_UPDATES_MAX)
+
+async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /restart command - restart the dashboard (stop then start)."""
+    # Track user action
+    log_user_action(update, "command", "/restart")
+    
+    global dashboard_process, dashboard_owners
+    
+    # Get user from effective_user, or from callback_query if available
+    user = update.effective_user
+    if user and hasattr(user, 'is_bot') and user.is_bot:
+        if update.callback_query and update.callback_query.from_user:
+            user = update.callback_query.from_user
+            logger.debug(f"Restart command - got user from callback_query: {user.id} ({user.username})")
+        elif context and context.user_data and 'callback_query_user' in context.user_data:
+            user = context.user_data['callback_query_user']
+            # Clean up after use
+            del context.user_data['callback_query_user']
+            logger.debug(f"Restart command - got user from context: {user.id} ({user.username})")
+    
+    user_id = user.id if user else None
+    
+    if not user_id:
+        await update.message.reply_text("❌ Could not identify user.")
+        return
+    
+    # Check if dashboard is running and if user owns it
+    dashboard_running = _check_dashboard_running()
+    user_owns_dashboard = False
+    
+    if user_id in dashboard_owners:
+        owner_info = dashboard_owners[user_id]
+        if owner_info["process"] and owner_info["process"].poll() is None:
+            user_owns_dashboard = True
+    
+    if not dashboard_running:
+        # Dashboard not running, just start it
+        await update.message.reply_text("🔄 Dashboard is not running. Starting it now...")
+        await run_command(update, context)
+        return
+    
+    if not user_owns_dashboard:
+        # Dashboard is running but user doesn't own it
+        running_owner = None
+        for uid, info in dashboard_owners.items():
+            if info["process"] and info["process"].poll() is None:
+                running_owner = info
+                break
+        
+        if running_owner:
+            owner_username = running_owner.get("username", "another user")
+            await update.message.reply_text(
+                f"⚠️ *You don't own the running dashboard*\n\n"
+                f"Started by: @{owner_username}\n"
+                f"Only the owner can restart it."
+            )
+            return
+        else:
+            await update.message.reply_text(
+                "⚠️ *Dashboard is running, but you don't own it*\n\n"
+                "The dashboard was started by another user or manually.\n"
+                "Only the owner can restart it."
+            )
+            return
+    
+    # User owns the dashboard, proceed with restart
+    restart_msg = await update.message.reply_text("🔄 Restarting dashboard...\n⏹️ Stopping current instance...")
+    
+    try:
+        # Stop the dashboard
+        await stop_command(update, context)
+        
+        # Wait a moment for cleanup
+        await asyncio.sleep(2)
+        
+        # Start the dashboard
+        await restart_msg.edit_text("🔄 Restarting dashboard...\n▶️ Starting new instance...")
+        await run_command(update, context)
+        
+    except Exception as e:
+        logger.error(f"Error restarting dashboard: {e}")
+        try:
+            await restart_msg.edit_text(f"❌ Error restarting dashboard: {str(e)}")
+        except:
+            await update.message.reply_text(f"❌ Error restarting dashboard: {str(e)}")
+
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /status command - check dashboard status."""
@@ -1938,6 +2036,7 @@ async def main_async() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("run", run_command))
     application.add_handler(CommandHandler("stop", stop_command))
+    application.add_handler(CommandHandler("restart", restart_command))
     application.add_handler(CommandHandler("status", status_command))
     
     # Data query handlers
