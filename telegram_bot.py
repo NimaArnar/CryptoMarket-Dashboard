@@ -124,20 +124,21 @@ def create_main_keyboard() -> InlineKeyboardMarkup:
 
 
 def create_help_keyboard() -> InlineKeyboardMarkup:
-    """Create keyboard for help screen (without help button)."""
+    """Create keyboard for help screen (only about and back buttons)."""
     keyboard = [
-        [
-            InlineKeyboardButton("📊 Dashboard Control", callback_data="menu_dashboard")
-        ],
-        [
-            InlineKeyboardButton("💰 Data Queries", callback_data="menu_data")
-        ],
-        [
-            InlineKeyboardButton("⚡ Quick Actions", callback_data="menu_quick")
-        ],
         [
             InlineKeyboardButton("ℹ️ What's this bot for?", callback_data="about")
         ],
+        [
+            InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def create_about_keyboard() -> InlineKeyboardMarkup:
+    """Create keyboard for about screen (only back button)."""
+    keyboard = [
         [
             InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
         ]
@@ -503,22 +504,17 @@ async def about_command_edit(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Use /start to see the main menu, or /help for command list."
     )
     # Edit the existing message instead of sending new
+    # Use about_keyboard which only has back button
     try:
         await query.edit_message_text(
             text=about_text,
             parse_mode="Markdown",
-            reply_markup=create_help_keyboard()
+            reply_markup=create_about_keyboard()
         )
     except Exception as e:
-        logger.debug(f"Could not edit message, sending new: {e}")
-        # Fallback: if edit fails, send new message
-        chat_id = query.message.chat_id
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=about_text,
-            parse_mode="Markdown",
-            reply_markup=create_help_keyboard()
-        )
+        logger.debug(f"Could not edit message: {e}")
+        # Don't send new message as fallback - just log the error
+        logger.warning(f"About: Failed to edit message: {e}")
 
 
 async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -545,7 +541,7 @@ async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(
         about_text,
         parse_mode="Markdown",
-        reply_markup=create_help_keyboard()
+        reply_markup=create_about_keyboard()
     )
 
 
