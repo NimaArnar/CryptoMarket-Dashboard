@@ -123,6 +123,25 @@ def create_main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
+def create_help_keyboard() -> InlineKeyboardMarkup:
+    """Create keyboard for help screen (without help button)."""
+    keyboard = [
+        [
+            InlineKeyboardButton("📊 Dashboard Control", callback_data="menu_dashboard")
+        ],
+        [
+            InlineKeyboardButton("💰 Data Queries", callback_data="menu_data")
+        ],
+        [
+            InlineKeyboardButton("⚡ Quick Actions", callback_data="menu_quick")
+        ],
+        [
+            InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 def create_dashboard_keyboard() -> InlineKeyboardMarkup:
     """Create keyboard for dashboard control commands."""
     keyboard = [
@@ -280,10 +299,37 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     
     elif data == "help":
-        try:
-            await query.message.delete()
-        except Exception as e:
-            logger.debug(f"Could not delete message: {e}")
+        # Check if message already shows help
+        message_text = query.message.text or ""
+        message_caption = query.message.caption or ""
+        full_text = message_text + message_caption
+        
+        # Check for unique identifier: dashboard URL or port number which only appears in help message
+        dashboard_url = f"http://127.0.0.1:{DASH_PORT}/"
+        port_str = f":{DASH_PORT}/"
+        
+        # Check if this is already a help message
+        # The dashboard URL is unique to help message - this is the most reliable check
+        has_url = dashboard_url in full_text or port_str in full_text or f"127.0.0.1:{DASH_PORT}" in full_text
+        
+        # Check for help-specific content (title + sections)
+        has_help_title = "Help - Crypto Market Dashboard Bot" in full_text
+        has_help_sections = "Dashboard Control:" in full_text and "Data Queries:" in full_text
+        
+        # Only consider it a help message if it has the URL (most reliable) OR both title and sections
+        is_help_message = has_url or (has_help_title and has_help_sections)
+        
+        # Log for debugging
+        logger.info(f"Help button - text_len: {len(full_text)}, has_url: {has_url}, has_title: {has_help_title}, has_sections: {has_help_sections}, is_help: {is_help_message}")
+        
+        # If message is already showing help, don't edit again
+        if is_help_message:
+            # Already showing help - callback already answered at start of function
+            # Just return without doing anything to avoid any message changes
+            logger.info("Help: Already showing help, skipping edit")
+            return
+        
+        logger.info("Help: Not showing help yet, editing message")
         
         help_text = (
             "📚 *Help - Crypto Market Dashboard Bot*\n\n"
@@ -300,12 +346,34 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "*/info <SYMBOL>* - Detailed coin information\n\n"
             f"🌐 Dashboard: http://127.0.0.1:{DASH_PORT}/"
         )
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=help_text,
-            parse_mode="Markdown",
-            reply_markup=create_main_keyboard()
-        )
+        
+        # Always try to edit the message first
+        # Use help_keyboard which doesn't have the help button
+        try:
+            await query.edit_message_text(
+                text=help_text,
+                parse_mode="Markdown",
+                reply_markup=create_help_keyboard()
+            )
+            logger.info("Help: Successfully edited message to show help")
+        except Exception as e:
+            logger.warning(f"Help: Could not edit message (will try to send new): {e}")
+            # If edit fails, delete the old message and send a new one
+            try:
+                await query.message.delete()
+            except Exception as del_err:
+                logger.debug(f"Help: Could not delete message: {del_err}")
+            
+            try:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=help_text,
+                    parse_mode="Markdown",
+                    reply_markup=create_help_keyboard()
+                )
+                logger.info("Help: Sent new message as fallback")
+            except Exception as e2:
+                logger.error(f"Help: Failed to send new message: {e2}")
         return
     
     # Command execution - create a new Update object with the message from callback query
@@ -428,7 +496,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(
         help_text,
         parse_mode="Markdown",
-        reply_markup=create_main_keyboard()
+        reply_markup=create_help_keyboard()
     )
 
 
@@ -1291,6 +1359,51 @@ async def coins_command_edit(query, context: ContextTypes.DEFAULT_TYPE, page: in
     except Exception as e:
         logger.error(f"Error editing coins message: {e}")
         await query.answer("❌ Error updating page", show_alert=True)
+
+
+# Rate limiting for bot commands
+user_command_times: dict[int, list[datetime]] = defaultdict(list)
+
+
+def rate_limit(max_calls: int = 10, period: int = 60):
+    """
+    Decorator to rate limit bot commands.
+    
+    Args:
+        max_calls: Maximum number of calls allowed in the period
+        period: Time period in seconds
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            user = update.effective_user
+            if not user:
+                return await func(update, context)
+            
+            user_id = user.id
+            now = datetime.now()
+            
+            # Clean old entries
+            user_command_times[user_id] = [
+                t for t in user_command_times[user_id]
+                if now - t < timedelta(seconds=period)
+            ]
+            
+            # Check rate limit
+            if len(user_command_times[user_id]) >= max_calls:
+                await update.message.reply_text(
+                    f"⏳ *Rate limit exceeded*\n\n"
+                    f"You've used this command {max_calls} times in the last {period} seconds.\n"
+                    f"Please wait {period} seconds before trying again."
+                )
+                return
+            
+            # Record this command
+            user_command_times[user_id].append(now)
+            
+            return await func(update, context)
+        return wrapper
+    return decorator
 
 
 @rate_limit(max_calls=20, period=60)
