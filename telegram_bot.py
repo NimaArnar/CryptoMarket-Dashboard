@@ -8,6 +8,9 @@ import sys
 import threading
 import time
 from typing import Optional, Tuple
+from functools import wraps
+from collections import defaultdict
+from datetime import datetime, timedelta
 import pandas as pd
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -353,6 +356,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         context.args = [symbol]
         cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
         await marketcap_command(cmd_update, context)
+        return
+    
+    # Pagination for coins command
+    elif data.startswith("coins_page_"):
+        page = data.split("_")[2]
+        context.args = [page]
+        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        await coins_command(cmd_update, context)
         return
 
 
@@ -1163,6 +1174,51 @@ def _load_single_coin_data(symbol: str) -> Tuple[Optional[pd.Series], Optional[p
     return mc_series, price_series, (cat, grp)
 
 
+# Rate limiting for bot commands
+user_command_times: dict[int, list[datetime]] = defaultdict(list)
+
+
+def rate_limit(max_calls: int = 10, period: int = 60):
+    """
+    Decorator to rate limit bot commands.
+    
+    Args:
+        max_calls: Maximum number of calls allowed in the period
+        period: Time period in seconds
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            user = update.effective_user
+            if not user:
+                return await func(update, context)
+            
+            user_id = user.id
+            now = datetime.now()
+            
+            # Clean old entries
+            user_command_times[user_id] = [
+                t for t in user_command_times[user_id]
+                if now - t < timedelta(seconds=period)
+            ]
+            
+            # Check rate limit
+            if len(user_command_times[user_id]) >= max_calls:
+                await update.message.reply_text(
+                    f"⏳ *Rate limit exceeded*\n\n"
+                    f"You've used this command {max_calls} times in the last {period} seconds.\n"
+                    f"Please wait {period} seconds before trying again."
+                )
+                return
+            
+            # Record this command
+            user_command_times[user_id].append(now)
+            
+            return await func(update, context)
+        return wrapper
+    return decorator
+
+
 def validate_symbol(symbol: str) -> bool:
     """Validate coin symbol format."""
     import re
@@ -1207,6 +1263,7 @@ def _check_dashboard_running() -> bool:
     return False
 
 
+@rate_limit(max_calls=15, period=60)
 async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /price command - get latest price for a coin."""
     # Track user action
@@ -1309,6 +1366,7 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
+@rate_limit(max_calls=15, period=60)
 async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /marketcap command - get market cap for a coin."""
     # Track user action
@@ -1341,10 +1399,27 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     loading_msg = None
     
     try:
-        loading_msg = await update.message.reply_text("🔄 Loading data...")
+        loading_msg = await update.message.reply_text("🔄 Loading data...\n⏳ This may take a few seconds...")
         import asyncio
         loop = asyncio.get_event_loop()
+        
+        # Load data asynchronously in executor (non-blocking)
+        async def update_progress():
+            await asyncio.sleep(2)
+            if loading_msg:
+                try:
+                    await loading_msg.edit_text("🔄 Loading data...\n⏳ Processing cached data...")
+                except Exception:
+                    pass
+        
+        # Start progress update task
+        progress_task = asyncio.create_task(update_progress())
+        
+        # Load data in executor (non-blocking)
         dm = await loop.run_in_executor(None, _load_data_manager)
+        
+        # Cancel progress update if still running
+        progress_task.cancel()
         
         if symbol not in dm.series:
             await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
@@ -1384,8 +1459,9 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
+@rate_limit(max_calls=20, period=60)
 async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /coins command - list all available coins."""
+    """Handle /coins command - list all available coins with pagination."""
     # Track user action
     log_user_action(update, "command", "/coins")
     
@@ -1397,23 +1473,64 @@ async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         symbols = sorted([sym for _, sym, _, _ in COINS])
         symbols.append(DOM_SYM)  # Add USDT.D
         
-        coins_text = f"💰 *Available Coins ({len(symbols)})*\n\n"
+        # Parse page number from command args
+        page = 1
+        if context.args and len(context.args) > 0:
+            try:
+                page = int(context.args[0])
+                if page < 1:
+                    page = 1
+            except ValueError:
+                page = 1
+        
+        # Calculate pagination
+        total_coins = len(symbols)
+        coins_per_page = BOT_COINS_PER_PAGE
+        total_pages = (total_coins + coins_per_page - 1) // coins_per_page
+        
+        if page > total_pages:
+            page = total_pages
+        
+        # Calculate start and end indices
+        start_idx = (page - 1) * coins_per_page
+        end_idx = min(start_idx + coins_per_page, total_coins)
+        page_symbols = symbols[start_idx:end_idx]
+        
+        # Build message
+        coins_text = f"💰 *Available Coins ({total_coins} total)*\n"
+        coins_text += f"📄 Page {page}/{total_pages}\n\n"
         
         # Format as a clean list (3 columns for better readability)
-        # Split into chunks of 3 for better formatting
-        for i in range(0, len(symbols), 3):
-            chunk = symbols[i:i+3]
+        for i in range(0, len(page_symbols), 3):
+            chunk = page_symbols[i:i+3]
             coins_text += "  ".join(f"`{sym:8s}`" for sym in chunk) + "\n"
         
         coins_text += f"\n💡 Use `/price <SYMBOL>` to get price info"
         
-        await update.message.reply_text(coins_text, parse_mode="Markdown")
+        # Create navigation keyboard if multiple pages
+        keyboard = None
+        if total_pages > 1:
+            keyboard_buttons = []
+            if page > 1:
+                keyboard_buttons.append(InlineKeyboardButton("◀️ Previous", callback_data=f"coins_page_{page-1}"))
+            if page < total_pages:
+                keyboard_buttons.append(InlineKeyboardButton("Next ▶️", callback_data=f"coins_page_{page+1}"))
+            
+            if keyboard_buttons:
+                keyboard = InlineKeyboardMarkup([keyboard_buttons])
+        
+        await update.message.reply_text(
+            coins_text, 
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
         
     except Exception as e:
         logger.error(f"Error listing coins: {e}")
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
+@rate_limit(max_calls=10, period=60)
 async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /latest command - get latest prices for all coins."""
     # Track user action
@@ -1430,10 +1547,28 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     loading_msg = None
     try:
-        loading_msg = await update.message.reply_text("🔄 Loading data...")
+        loading_msg = await update.message.reply_text("🔄 Loading data...\n⏳ This may take a few seconds...")
         import asyncio
         loop = asyncio.get_event_loop()
+        
+        # Load data asynchronously in executor (non-blocking)
+        # Update progress message after a short delay
+        async def update_progress():
+            await asyncio.sleep(2)
+            if loading_msg:
+                try:
+                    await loading_msg.edit_text("🔄 Loading data...\n⏳ Processing cached data...")
+                except Exception:
+                    pass
+        
+        # Start progress update task
+        progress_task = asyncio.create_task(update_progress())
+        
+        # Load data in executor (non-blocking)
         dm = await loop.run_in_executor(None, _load_data_manager)
+        
+        # Cancel progress update if still running
+        progress_task.cancel()
         
         if dm.df_raw is None or dm.df_raw.empty:
             await update.message.reply_text("❌ No data available. Try running the dashboard first.")
@@ -1533,6 +1668,7 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
+@rate_limit(max_calls=15, period=60)
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /info command - get detailed information for a coin."""
     # Track user action
@@ -1565,10 +1701,27 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     loading_msg = None
     
     try:
-        loading_msg = await update.message.reply_text("🔄 Loading data...")
+        loading_msg = await update.message.reply_text("🔄 Loading data...\n⏳ This may take a few seconds...")
         import asyncio
         loop = asyncio.get_event_loop()
+        
+        # Load data asynchronously in executor (non-blocking)
+        async def update_progress():
+            await asyncio.sleep(2)
+            if loading_msg:
+                try:
+                    await loading_msg.edit_text("🔄 Loading data...\n⏳ Processing cached data...")
+                except Exception:
+                    pass
+        
+        # Start progress update task
+        progress_task = asyncio.create_task(update_progress())
+        
+        # Load data in executor (non-blocking)
         dm = await loop.run_in_executor(None, _load_data_manager)
+        
+        # Cancel progress update if still running
+        progress_task.cancel()
         
         if symbol not in dm.series:
             await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
