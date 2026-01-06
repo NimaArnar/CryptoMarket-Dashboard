@@ -32,6 +32,9 @@ This directory contains issue templates for problems found during code review.
 20. **020-bot-bio-and-about-button.md** - Enhancement: Add bot bio information and "What's this bot for?" button (Medium priority)
 21. **021-fix-about-button-behavior.md** - Bug: Fix "What's this bot for?" button behavior (Medium priority)
 22. **022-add-about-to-command-bar.md** - Enhancement: Add "What's this bot for?" to Telegram command bar (Low priority)
+23. **023-help-menu-simplify-buttons.md** - Bug: Help menu should only show 2 buttons (Medium priority) ✅ Fixed
+24. **024-about-button-edit-message.md** - Bug: About button should edit message, not send new (Medium priority) ✅ Fixed
+25. **025-about-screen-single-button.md** - Bug: About screen should only show back button (Medium priority) ✅ Fixed
 
 ## Priority Guide
 
