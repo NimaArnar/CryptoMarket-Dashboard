@@ -345,8 +345,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     
     elif data == "cmd_coins":
-        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
-        await coins_command(cmd_update, context)
+        # Edit the existing message instead of sending a new one
+        await coins_command_edit(query, context, 1)
         return
     
     elif data == "cmd_latest":
