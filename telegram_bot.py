@@ -13,7 +13,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 import pandas as pd
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 from telegram.error import Conflict, TimedOut, NetworkError
 
@@ -2140,6 +2140,26 @@ async def main_async() -> None:
     
     # Create application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    # Register bot commands for command bar (shows when user presses "/")
+    try:
+        commands = [
+            BotCommand("start", "Start the bot and show main menu"),
+            BotCommand("help", "Show help and available commands"),
+            BotCommand("run", "Start the dashboard server"),
+            BotCommand("stop", "Stop the dashboard server"),
+            BotCommand("restart", "Restart the dashboard server"),
+            BotCommand("status", "Check if dashboard is running"),
+            BotCommand("price", "Get latest price for a coin (e.g., /price BTC)"),
+            BotCommand("marketcap", "Get market cap for a coin (e.g., /marketcap ETH)"),
+            BotCommand("coins", "List all available coins"),
+            BotCommand("latest", "Get latest prices for all coins"),
+            BotCommand("info", "Get detailed information for a coin (e.g., /info BTC)"),
+        ]
+        await application.bot.set_my_commands(commands)
+        logger.info("Bot commands registered successfully")
+    except Exception as e:
+        logger.warning(f"Could not register bot commands: {e}. Continuing anyway...")
     
     # Register callback query handler (for buttons) - must be before command handlers
     application.add_handler(CallbackQueryHandler(button_callback))
