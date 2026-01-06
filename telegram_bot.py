@@ -362,8 +362,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif data.startswith("coins_page_"):
         page = data.split("_")[2]
         context.args = [page]
-        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
-        await coins_command(cmd_update, context)
+        # Edit the existing message instead of sending a new one
+        await coins_command_edit(query, context, int(page))
         return
 
 
@@ -1126,6 +1126,105 @@ def _get_local_ip() -> Optional[str]:
         return None
 
 
+def _build_coins_message(page: int) -> tuple[str, Optional[InlineKeyboardMarkup]]:
+    """Build coins list message and keyboard for a given page."""
+    from src.constants import COINS, DOM_SYM
+    
+    # Extract symbols and sort alphabetically
+    symbols = sorted([sym for _, sym, _, _ in COINS])
+    symbols.append(DOM_SYM)  # Add USDT.D
+    
+    # Calculate pagination
+    total_coins = len(symbols)
+    coins_per_page = BOT_COINS_PER_PAGE
+    total_pages = (total_coins + coins_per_page - 1) // coins_per_page
+    
+    if page > total_pages:
+        page = total_pages
+    if page < 1:
+        page = 1
+    
+    # Calculate start and end indices
+    start_idx = (page - 1) * coins_per_page
+    end_idx = min(start_idx + coins_per_page, total_coins)
+    page_symbols = symbols[start_idx:end_idx]
+    
+    # Build message
+    coins_text = f"💰 *Available Coins ({total_coins} total)*\n"
+    coins_text += f"📄 Page {page}/{total_pages}\n\n"
+    
+    # Format as a clean list (3 columns for better readability)
+    for i in range(0, len(page_symbols), 3):
+        chunk = page_symbols[i:i+3]
+        coins_text += "  ".join(f"`{sym:8s}`" for sym in chunk) + "\n"
+    
+    coins_text += f"\n💡 Use `/price <SYMBOL>` to get price info"
+    
+    # Create navigation keyboard
+    keyboard_buttons = []
+    
+    # Pagination buttons
+    if total_pages > 1:
+        page_buttons = []
+        if page > 1:
+            page_buttons.append(InlineKeyboardButton("◀️ Previous", callback_data=f"coins_page_{page-1}"))
+        if page < total_pages:
+            page_buttons.append(InlineKeyboardButton("Next ▶️", callback_data=f"coins_page_{page+1}"))
+        if page_buttons:
+            keyboard_buttons.append(page_buttons)
+    
+    # Back to main menu button
+    keyboard_buttons.append([InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")])
+    
+    keyboard = InlineKeyboardMarkup(keyboard_buttons) if keyboard_buttons else None
+    
+    return coins_text, keyboard
+
+
+async def coins_command_edit(query, context: ContextTypes.DEFAULT_TYPE, page: int) -> None:
+    """Handle coins pagination by editing existing message."""
+    try:
+        coins_text, keyboard = _build_coins_message(page)
+        await query.edit_message_text(
+            coins_text,
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        logger.error(f"Error editing coins message: {e}")
+        await query.answer("❌ Error updating page", show_alert=True)
+
+
+@rate_limit(max_calls=20, period=60)
+async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /coins command - list all available coins with pagination."""
+    # Track user action
+    log_user_action(update, "command", "/coins")
+    
+    try:
+        # Parse page number from command args
+        page = 1
+        if context.args and len(context.args) > 0:
+            try:
+                page = int(context.args[0])
+                if page < 1:
+                    page = 1
+            except ValueError:
+                page = 1
+        
+        coins_text, keyboard = _build_coins_message(page)
+        
+        await update.message.reply_text(
+            coins_text, 
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        
+    except Exception as e:
+        logger.error(f"Error listing coins: {e}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
 def _load_single_coin_data(symbol: str) -> Tuple[Optional[pd.Series], Optional[pd.Series], Optional[Tuple[str, str]]]:
     """Load data for a single coin only (faster for price/marketcap commands)."""
     from src.config import CACHE_DIR, DAYS_HISTORY, VS_CURRENCY
@@ -1456,77 +1555,6 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             except Exception as e:
                 logger.debug(f"Could not delete loading message: {e}")
                 pass
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-
-@rate_limit(max_calls=20, period=60)
-async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /coins command - list all available coins with pagination."""
-    # Track user action
-    log_user_action(update, "command", "/coins")
-    
-    # Get coins directly from constants (no need to load data)
-    from src.constants import COINS, DOM_SYM
-    
-    try:
-        # Extract symbols and sort alphabetically
-        symbols = sorted([sym for _, sym, _, _ in COINS])
-        symbols.append(DOM_SYM)  # Add USDT.D
-        
-        # Parse page number from command args
-        page = 1
-        if context.args and len(context.args) > 0:
-            try:
-                page = int(context.args[0])
-                if page < 1:
-                    page = 1
-            except ValueError:
-                page = 1
-        
-        # Calculate pagination
-        total_coins = len(symbols)
-        coins_per_page = BOT_COINS_PER_PAGE
-        total_pages = (total_coins + coins_per_page - 1) // coins_per_page
-        
-        if page > total_pages:
-            page = total_pages
-        
-        # Calculate start and end indices
-        start_idx = (page - 1) * coins_per_page
-        end_idx = min(start_idx + coins_per_page, total_coins)
-        page_symbols = symbols[start_idx:end_idx]
-        
-        # Build message
-        coins_text = f"💰 *Available Coins ({total_coins} total)*\n"
-        coins_text += f"📄 Page {page}/{total_pages}\n\n"
-        
-        # Format as a clean list (3 columns for better readability)
-        for i in range(0, len(page_symbols), 3):
-            chunk = page_symbols[i:i+3]
-            coins_text += "  ".join(f"`{sym:8s}`" for sym in chunk) + "\n"
-        
-        coins_text += f"\n💡 Use `/price <SYMBOL>` to get price info"
-        
-        # Create navigation keyboard if multiple pages
-        keyboard = None
-        if total_pages > 1:
-            keyboard_buttons = []
-            if page > 1:
-                keyboard_buttons.append(InlineKeyboardButton("◀️ Previous", callback_data=f"coins_page_{page-1}"))
-            if page < total_pages:
-                keyboard_buttons.append(InlineKeyboardButton("Next ▶️", callback_data=f"coins_page_{page+1}"))
-            
-            if keyboard_buttons:
-                keyboard = InlineKeyboardMarkup([keyboard_buttons])
-        
-        await update.message.reply_text(
-            coins_text, 
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
-        
-    except Exception as e:
-        logger.error(f"Error listing coins: {e}")
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
