@@ -28,6 +28,7 @@ This directory contains issue templates for problems found during code review.
 16. **016-1year-chart-image.md** - Feature: 1 year chart image of coins
 17. **017-timeframe-summary.md** - Feature: 1d, 1w, 1m and 1y summary for coins
 18. **018-telegram-command-bar.md** - Enhancement: Show command bar in Telegram using "/" button (High priority)
+19. **019-enhance-info-command.md** - Enhancement: Show full coin details in /info command (High priority)
 
 ## Priority Guide
 
