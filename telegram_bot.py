@@ -1,19 +1,25 @@
 """Telegram bot for Crypto Market Dashboard control."""
 import asyncio
 import http.client
+import json
+import logging
 import os
+import re
+import requests
 import socket
 import subprocess
 import sys
 import threading
 import time
-from typing import Optional, Tuple, Dict
-from functools import wraps
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, timedelta
-import pandas as pd
+from functools import wraps
+from pathlib import Path
+from typing import Optional, Tuple, Dict
 
+import pandas as pd
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram import Update as UpdateClass
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 from telegram.error import Conflict, TimedOut, NetworkError
 
@@ -24,17 +30,17 @@ from src.config import (
     BOT_WAIT_INTERVAL,
     BOT_PROCESSED_UPDATES_MAX,
     BOT_MAX_MESSAGE_LENGTH,
-    BOT_COINS_PER_PAGE
+    BOT_COINS_PER_PAGE,
+    COINGECKO_API_BASE,
+    COINGECKO_API_KEY,
+    CACHE_DIR,
+    DAYS_HISTORY,
+    VS_CURRENCY
 )
 from src.data_manager import DataManager
 from src.utils import setup_logger
 
 logger = setup_logger(__name__)
-
-# User action tracking logger
-from datetime import datetime
-from pathlib import Path
-import logging
 
 USER_LOG_DIR = PROJECT_ROOT / "logs"
 USER_LOG_DIR.mkdir(exist_ok=True)
@@ -391,26 +397,28 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     # Command execution - create a new Update object with the message from callback query
     # Update objects are immutable, so we need to create a new one
-    from telegram import Update as UpdateClass
+    def create_update_from_query() -> Update:
+        """Helper to create Update object from callback query."""
+        return UpdateClass(update_id=update.update_id, message=query.message)
     
     # Command execution
     if data == "cmd_run":
         # Create new Update with message from callback query
-        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        cmd_update = create_update_from_query()
         # Store the callback query user in context for run_command to use
         context.user_data['callback_query_user'] = query.from_user
         await run_command(cmd_update, context)
         return
     
     elif data == "cmd_stop":
-        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        cmd_update = create_update_from_query()
         # Store the callback query user in context for stop_command to use
         context.user_data['callback_query_user'] = query.from_user
         await stop_command(cmd_update, context)
         return
     
     elif data == "cmd_restart":
-        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        cmd_update = create_update_from_query()
         # Store the callback query user in context for restart_command to use
         context.user_data['callback_query_user'] = query.from_user
         await restart_command(cmd_update, context)
@@ -419,7 +427,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif data == "cmd_status":
         # Create Update object - the message should have from_user from the original message
         # But we'll ensure status_command gets the user from callback_query if needed
-        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        cmd_update = create_update_from_query()
         # Store the callback query user in context for status_command to use
         context.user_data['callback_query_user'] = query.from_user
         await status_command(cmd_update, context)
@@ -431,7 +439,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     
     elif data == "cmd_latest":
-        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        cmd_update = create_update_from_query()
         await latest_command(cmd_update, context)
         return
     
@@ -439,14 +447,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif data.startswith("price_"):
         symbol = data.split("_")[1]
         context.args = [symbol]
-        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        cmd_update = create_update_from_query()
         await price_command(cmd_update, context)
         return
     
     elif data.startswith("info_"):
         symbol = data.split("_")[1]
         context.args = [symbol]
-        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        cmd_update = create_update_from_query()
         await info_command(cmd_update, context)
         return
     
@@ -678,9 +686,6 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         # Wait for dashboard to be ready (check if port responds)
         await loading_msg.edit_text("🔄 Starting dashboard...\n⏳ Waiting for dashboard to load data...")
         
-        import socket
-        import http.client
-        import threading
         import queue
         
         max_wait = BOT_MAX_DASHBOARD_WAIT  # Maximum wait time in seconds (8 minutes for data loading)
@@ -699,12 +704,7 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             nonlocal last_progress, coins_fetched, current_batch, total_batches
             try:
                 # Read from both stdout and stderr
-                import select
-                import sys
-                
-                # On Windows, we need to use a different approach
-                import queue as q
-                import threading
+                # Note: select module is not available on Windows, using threading approach
                 
                 def read_stream(stream, stream_name):
                     try:
@@ -925,7 +925,7 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         logger.error(f"Error starting dashboard: {e}")
         try:
             await loading_msg.edit_text(f"❌ Error: {str(e)}")
-        except:
+        except Exception:
             await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
@@ -1040,7 +1040,6 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("🛑 Dashboard stopped successfully!")
     else:
         # Double-check if port is still in use
-        import socket
         port_in_use = False
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -1062,7 +1061,6 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 # Track processed updates to prevent duplicates (use deque with maxlen for automatic cleanup)
-from collections import deque
 _processed_updates: deque = deque(maxlen=BOT_PROCESSED_UPDATES_MAX)
 
 async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1147,7 +1145,7 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logger.error(f"Error restarting dashboard: {e}")
         try:
             await restart_msg.edit_text(f"❌ Error restarting dashboard: {str(e)}")
-        except:
+        except Exception:
             await update.message.reply_text(f"❌ Error restarting dashboard: {str(e)}")
 
 
@@ -1232,7 +1230,6 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     bot_started = user_owns_dashboard and (running_owner is not None and running_owner["user_id"] == user_id)
     
     # Also check if dashboard is running on the port (even if not started by bot)
-    import socket
     port_in_use = False
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -1348,7 +1345,6 @@ def _load_data_sync() -> DataManager:
 def _get_local_ip() -> Optional[str]:
     """Get the local IP address for network access."""
     try:
-        import socket
         # Connect to a remote address to determine local IP
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(0)
@@ -1438,6 +1434,10 @@ async def coins_command_edit(query, context: ContextTypes.DEFAULT_TYPE, page: in
 user_command_times: dict[int, list[datetime]] = defaultdict(list)
 
 
+# Rate limiting for bot commands
+user_command_times: dict[int, list[datetime]] = defaultdict(list)
+
+
 def rate_limit(max_calls: int = 10, period: int = 60):
     """
     Decorator to rate limit bot commands.
@@ -1511,8 +1511,6 @@ async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 def _fetch_coin_details(coin_id: str) -> Optional[Dict]:
     """Fetch coin details (circulating supply, total supply) from CoinGecko API."""
-    from src.config import COINGECKO_API_BASE, COINGECKO_API_KEY
-    import requests
     
     url = f"{COINGECKO_API_BASE}/coins/{coin_id}"
     params = {
@@ -1545,26 +1543,25 @@ def _fetch_coin_details(coin_id: str) -> Optional[Dict]:
         return None
 
 
-def _load_single_coin_data(symbol: str) -> Tuple[Optional[pd.Series], Optional[pd.Series], Optional[Tuple[str, str]]]:
-    """Load data for a single coin only (faster for price command)."""
-    from src.config import CACHE_DIR, DAYS_HISTORY, VS_CURRENCY
+def _find_coin_info(symbol: str) -> Optional[Tuple[str, str, str]]:
+    """Find coin_id, category, and group for a symbol."""
     from src.constants import COINS
-    from src.data.fetcher import fetch_market_caps_retry
-    import json
-    
-    # Find the coin_id for this symbol
-    coin_id = None
-    cat = None
-    grp = None
     for cid, sym, c, g in COINS:
         if sym.upper() == symbol.upper():
-            coin_id = cid
-            cat = c
-            grp = g
-            break
+            return cid, c, g
+    return None
+
+
+def _load_single_coin_data(symbol: str) -> Tuple[Optional[pd.Series], Optional[pd.Series], Optional[Tuple[str, str]]]:
+    """Load data for a single coin only (faster for price command)."""
+    from src.data.fetcher import fetch_market_caps_retry
     
-    if not coin_id:
+    # Find the coin_id for this symbol
+    coin_info = _find_coin_info(symbol)
+    if not coin_info:
         return None, None, None
+    
+    coin_id, cat, grp = coin_info
     
     # Load market cap data
     try:
@@ -1582,7 +1579,6 @@ def _load_single_coin_data(symbol: str) -> Tuple[Optional[pd.Series], Optional[p
                 js = json.load(f)
             
             if "prices" in js and js["prices"]:
-                import pandas as pd
                 df_prices = pd.DataFrame(js["prices"], columns=["ts", "price"])
                 df_prices["date"] = pd.to_datetime(df_prices["ts"], unit="ms").dt.floor("D")
                 df_prices = df_prices.sort_values("ts").groupby("date", as_index=False).last()
@@ -1593,56 +1589,49 @@ def _load_single_coin_data(symbol: str) -> Tuple[Optional[pd.Series], Optional[p
     return mc_series, price_series, (cat, grp)
 
 
-# Rate limiting for bot commands
-user_command_times: dict[int, list[datetime]] = defaultdict(list)
-
-
-def rate_limit(max_calls: int = 10, period: int = 60):
-    """
-    Decorator to rate limit bot commands.
-    
-    Args:
-        max_calls: Maximum number of calls allowed in the period
-        period: Time period in seconds
-    """
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            user = update.effective_user
-            if not user:
-                return await func(update, context)
-            
-            user_id = user.id
-            now = datetime.now()
-            
-            # Clean old entries
-            user_command_times[user_id] = [
-                t for t in user_command_times[user_id]
-                if now - t < timedelta(seconds=period)
-            ]
-            
-            # Check rate limit
-            if len(user_command_times[user_id]) >= max_calls:
-                await update.message.reply_text(
-                    f"⏳ *Rate limit exceeded*\n\n"
-                    f"You've used this command {max_calls} times in the last {period} seconds.\n"
-                    f"Please wait {period} seconds before trying again."
-                )
-                return
-            
-            # Record this command
-            user_command_times[user_id].append(now)
-            
-            return await func(update, context)
-        return wrapper
-    return decorator
-
-
 def validate_symbol(symbol: str) -> bool:
     """Validate coin symbol format."""
-    import re
     # Allow alphanumeric characters, 1-10 characters long
     return bool(re.match(r'^[A-Z0-9]{1,10}$', symbol.upper()))
+
+
+def format_timestamp(date_obj) -> str:
+    """Format timestamp from date object."""
+    if hasattr(date_obj, 'hour'):
+        return date_obj.strftime('%Y-%m-%d %H:%M:%S')
+    else:
+        return date_obj.strftime('%Y-%m-%d') + " (date only)"
+
+
+async def safe_delete_loading_message(loading_msg) -> None:
+    """Safely delete loading message if it exists."""
+    if loading_msg:
+        try:
+            await loading_msg.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete loading message: {e}")
+
+
+async def create_loading_message(update: Update) -> Optional:
+    """Create and return a loading message."""
+    try:
+        return await update.message.reply_text("🔄 Loading data...\n⏳ This may take a few seconds...")
+    except Exception as e:
+        logger.debug(f"Could not create loading message: {e}")
+        return None
+
+
+async def update_loading_progress(loading_msg, delay: float = 2.0) -> asyncio.Task:
+    """Create a task to update loading message progress."""
+    async def update_progress():
+        await asyncio.sleep(delay)
+        if loading_msg:
+            try:
+                await loading_msg.edit_text("🔄 Loading data...\n⏳ Processing cached data...")
+            except Exception:
+                pass
+    
+    return asyncio.create_task(update_progress())
 
 
 def _check_dashboard_running() -> bool:
@@ -1654,7 +1643,6 @@ def _check_dashboard_running() -> bool:
         return True
     
     # Check if port is in use
-    import socket
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(1)
@@ -1663,12 +1651,12 @@ def _check_dashboard_running() -> bool:
         sock.close()
         if port_in_use:
             return True
-    except:
+    except Exception:
         pass
     
     # Check for main.py processes
-    import psutil
     try:
+        import psutil
         for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
             try:
                 cmdline = proc.info.get('cmdline', [])
@@ -1676,7 +1664,7 @@ def _check_dashboard_running() -> bool:
                     return True
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
-    except:
+    except Exception:
         pass
     
     return False
@@ -1716,7 +1704,6 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     
     try:
         # Load only this coin's data (much faster than loading all coins)
-        import asyncio
         loop = asyncio.get_event_loop()
         mc_series, price_series, meta = await loop.run_in_executor(None, _load_single_coin_data, symbol)
         
@@ -1743,10 +1730,7 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                     change_emoji = "📈" if change_24h >= 0 else "📉"
         
         # Format timestamp
-        if hasattr(latest_date, 'hour'):
-            timestamp_str = latest_date.strftime('%Y-%m-%d %H:%M:%S')
-        else:
-            timestamp_str = latest_date.strftime('%Y-%m-%d') + " (date only)"
+        timestamp_str = format_timestamp(latest_date)
         
         # If no price data, show market cap only
         if latest_price is None:
@@ -1771,22 +1755,12 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             price_text += f"Last updated: {timestamp_str}\n"
         
         # Delete loading message and send result
-        if loading_msg:
-            try:
-                await loading_msg.delete()
-            except Exception as e:
-                logger.debug(f"Could not delete loading message: {e}")
-                pass
+        await safe_delete_loading_message(loading_msg)
         await update.message.reply_text(price_text, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error getting price for {symbol}: {e}")
-        if loading_msg:
-            try:
-                await loading_msg.delete()
-            except Exception as e:
-                logger.debug(f"Could not delete loading message: {e}")
-                pass
+        await safe_delete_loading_message(loading_msg)
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
@@ -1807,22 +1781,11 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     loading_msg = None
     try:
-        loading_msg = await update.message.reply_text("🔄 Loading data...\n⏳ This may take a few seconds...")
-        import asyncio
+        loading_msg = await create_loading_message(update)
         loop = asyncio.get_event_loop()
         
-        # Load data asynchronously in executor (non-blocking)
-        # Update progress message after a short delay
-        async def update_progress():
-            await asyncio.sleep(2)
-            if loading_msg:
-                try:
-                    await loading_msg.edit_text("🔄 Loading data...\n⏳ Processing cached data...")
-                except Exception:
-                    pass
-        
         # Start progress update task
-        progress_task = asyncio.create_task(update_progress())
+        progress_task = await update_loading_progress(loading_msg)
         
         # Load data in executor (non-blocking)
         dm = await loop.run_in_executor(None, _load_data_manager)
@@ -1861,10 +1824,7 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 latest_text += f"{sym}: MC ${mc:,.0f}\n"
         
         # Add timestamp at the end
-        if hasattr(latest_date, 'hour'):
-            latest_text += f"\nLast updated: {latest_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        else:
-            latest_text += f"\nLast updated: {latest_date.strftime('%Y-%m-%d')} (date only)\n"
+        latest_text += f"\nLast updated: {format_timestamp(latest_date)}\n"
         
         # Check message length and split if needed
         if len(latest_text) > BOT_MAX_MESSAGE_LENGTH:
@@ -1907,21 +1867,12 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             for msg in messages:
                 await update.message.reply_text(msg, parse_mode="Markdown")
         else:
-            if loading_msg:
-                try:
-                    await loading_msg.delete()
-                except Exception:
-                    pass
+            await safe_delete_loading_message(loading_msg)
             await update.message.reply_text(latest_text, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error getting latest prices: {e}")
-        if loading_msg:
-            try:
-                await loading_msg.delete()
-            except Exception as e:
-                logger.debug(f"Could not delete loading message: {e}")
-                pass
+        await safe_delete_loading_message(loading_msg)
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
@@ -1958,21 +1909,11 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     loading_msg = None
     
     try:
-        loading_msg = await update.message.reply_text("🔄 Loading data...\n⏳ This may take a few seconds...")
-        import asyncio
+        loading_msg = await create_loading_message(update)
         loop = asyncio.get_event_loop()
         
-        # Load data asynchronously in executor (non-blocking)
-        async def update_progress():
-            await asyncio.sleep(2)
-            if loading_msg:
-                try:
-                    await loading_msg.edit_text("🔄 Loading data...\n⏳ Processing cached data...")
-                except Exception:
-                    pass
-        
         # Start progress update task
-        progress_task = asyncio.create_task(update_progress())
+        progress_task = await update_loading_progress(loading_msg)
         
         # Load data in executor (non-blocking)
         dm = await loop.run_in_executor(None, _load_data_manager)
@@ -1981,16 +1922,13 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         progress_task.cancel()
         
         if symbol not in dm.series:
+            await safe_delete_loading_message(loading_msg)
             await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
             return
         
         # Get coin_id for fetching supply data
-        from src.constants import COINS
-        coin_id = None
-        for cid, sym, _, _ in COINS:
-            if sym.upper() == symbol.upper():
-                coin_id = cid
-                break
+        coin_info = _find_coin_info(symbol)
+        coin_id = coin_info[0] if coin_info else None
         
         info_text = f"📊 *{symbol} Information*\n\n"
         
@@ -2097,28 +2035,14 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         info_text += f"Data Points: {len(series)}\n"
         
         # Add timestamp at the end
-        if hasattr(latest_date, 'hour'):
-            timestamp_str = latest_date.strftime('%Y-%m-%d %H:%M:%S')
-        else:
-            timestamp_str = latest_date.strftime('%Y-%m-%d') + " (date only)"
-        info_text += f"\nLast updated: {timestamp_str}\n"
+        info_text += f"\nLast updated: {format_timestamp(latest_date)}\n"
         
-        if loading_msg:
-            try:
-                await loading_msg.delete()
-            except Exception as e:
-                logger.debug(f"Could not delete loading message: {e}")
-                pass
+        await safe_delete_loading_message(loading_msg)
         await update.message.reply_text(info_text, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error getting info for {symbol}: {e}")
-        if loading_msg:
-            try:
-                await loading_msg.delete()
-            except Exception as e:
-                logger.debug(f"Could not delete loading message: {e}")
-                pass
+        await safe_delete_loading_message(loading_msg)
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
