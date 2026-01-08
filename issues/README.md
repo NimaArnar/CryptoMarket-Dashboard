@@ -36,7 +36,11 @@ This directory contains issue templates for problems found during code review.
 24. **024-about-button-edit-message.md** - Bug: About button should edit message, not send new (Medium priority) ✅ Fixed
 25. **025-about-screen-single-button.md** - Bug: About screen should only show back button (Medium priority) ✅ Fixed
 26. **026-add-info-button-to-menus.md** - Enhancement: Add Info button to menus (Medium priority)
-27. **027-reduce-emojis-in-data-display.md** - Enhancement: Reduce emojis in data display - too crowded (Medium priority)
+27. **027-reduce-emojis-in-data-display.md** - Enhancement: Reduce emojis in data display - too crowded (Medium priority) ✅ Fixed
+28. **028-remove-marketcap-button.md** - Enhancement: Remove marketcap button - unessential (Low priority)
+29. **029-latest-show-all-coins.md** - Enhancement: /latest should show latest price of all coins (Medium priority)
+30. **030-remove-category-from-data-displays.md** - Enhancement: Remove category from data displays - only show in /info (Low priority)
+31. **031-add-timestamp-latest-update.md** - Enhancement: Add timestamp for latest update in relevant sections (Medium priority)
 
 ## Priority Guide
 
