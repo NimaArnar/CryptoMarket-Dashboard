@@ -186,6 +186,10 @@ def create_data_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("💎 Market Cap (ETH)", callback_data="marketcap_ETH")
         ],
         [
+            InlineKeyboardButton("📊 Info (BTC)", callback_data="info_BTC"),
+            InlineKeyboardButton("📊 Info (ETH)", callback_data="info_ETH")
+        ],
+        [
             InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
         ]
     ]
@@ -204,6 +208,10 @@ def create_quick_actions_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("🔗 LINK", callback_data="price_LINK"),
             InlineKeyboardButton("🔷 ARB", callback_data="price_ARB"),
             InlineKeyboardButton("🔺 AVAX", callback_data="price_AVAX")
+        ],
+        [
+            InlineKeyboardButton("📊 Info (BTC)", callback_data="info_BTC"),
+            InlineKeyboardButton("📊 Info (ETH)", callback_data="info_ETH")
         ],
         [
             InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
@@ -445,6 +453,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         context.args = [symbol]
         cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
         await marketcap_command(cmd_update, context)
+        return
+    
+    elif data.startswith("info_"):
+        symbol = data.split("_")[1]
+        context.args = [symbol]
+        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
+        await info_command(cmd_update, context)
         return
     
     # Pagination for coins command
