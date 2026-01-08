@@ -44,3 +44,11 @@ MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT_REQUESTS", "5"))
 DASH_PORT = int(os.getenv("PORT", "8052"))  # Use PORT env var for cloud deployment
 DASH_DEBUG = os.getenv("DASH_DEBUG", "False").lower() == "true"  # Disable debug in production
 
+# Telegram Bot Configuration
+BOT_MAX_DASHBOARD_WAIT = 480  # Maximum wait time for dashboard startup (seconds)
+BOT_WAIT_INTERVAL = 2  # Interval between dashboard readiness checks (seconds)
+BOT_PROCESSED_UPDATES_MAX = 100  # Maximum number of processed update IDs to track
+BOT_PROCESSED_UPDATES_CLEANUP = 50  # Number of entries to keep after cleanup
+BOT_MAX_MESSAGE_LENGTH = 4096  # Telegram message length limit
+BOT_COINS_PER_PAGE = 20  # Number of coins to show per page in /coins command
+

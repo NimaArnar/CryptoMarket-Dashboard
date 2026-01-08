@@ -49,7 +49,14 @@ Thumbs.db
 
 # Environment variables
 .env
+*.env
+
+# Telegram bot token (never commit!)
+TELEGRAM_BOT_TOKEN
 .env.local
+start_bot.ps1
+start_bot.bat
+.telegram_bot.lock
 
 # Telegram bot token files (never commit!)
 start_bot.ps1

@@ -1,0 +1,7 @@
+# PowerShell script to start Telegram bot
+# Copy this file to start_bot.ps1 and add your token
+
+$env:TELEGRAM_BOT_TOKEN="YOUR_BOT_TOKEN_HERE"
+python telegram_bot.py
+
+
