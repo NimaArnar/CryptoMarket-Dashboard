@@ -25,10 +25,9 @@ A comprehensive Telegram bot for controlling your Crypto Market Dashboard remote
 
 ### Data Queries
 - **Price Lookup**: Get latest price for any supported coin
-- **Market Cap**: Query market capitalization data
-- **Coin List**: View all available cryptocurrencies
-- **Latest Prices**: Get top coins by market cap
-- **Detailed Info**: Comprehensive coin information
+- **Coin List**: View all available cryptocurrencies with pagination
+- **Latest Prices**: Get latest prices for all coins
+- **Detailed Info**: Comprehensive coin information (supply, performance, data range)
 
 ### Interactive Interface
 - **Inline Keyboards**: Navigate commands with interactive buttons
@@ -154,10 +153,10 @@ Or manually via BotFather:
 | Command | Description | Example |
 |---------|-------------|---------|
 | `/price <SYMBOL>` | Get latest price | `/price BTC` |
-| `/marketcap <SYMBOL>` | Get market cap | `/marketcap ETH` |
 | `/coins` | List all available coins | `/coins` |
-| `/latest` | Latest prices (top 10) | `/latest` |
+| `/latest` | Latest prices for all coins | `/latest` |
 | `/info <SYMBOL>` | Detailed coin info | `/info DOGE` |
+| `/about` | Learn what this bot does | `/about` |
 
 ### Navigation
 
@@ -165,6 +164,7 @@ Or manually via BotFather:
 |---------|-------------|
 | `/start` | Show welcome message and main menu |
 | `/help` | Display help information |
+| `/about` | Learn what this bot does and its features |
 
 ## Usage Examples
 
@@ -350,10 +350,12 @@ The bot automatically prevents multiple instances using a lock file:
 
 ### Performance Optimization
 
-- **Single Coin Queries**: `/price` and `/marketcap` load only the requested coin (faster)
+- **Single Coin Queries**: `/price` and `/info` load only the requested coin (faster)
 - **Cached Data**: Uses 24-hour cache to minimize API calls
 - **Lazy Loading**: Data loaded only when needed
 - **Fast Coin List**: `/coins` command reads directly from constants (instant response)
+- **Rate Limiting**: Commands are rate-limited to prevent abuse
+- **Input Validation**: Symbol validation prevents invalid queries
 
 ### User Action Tracking
 

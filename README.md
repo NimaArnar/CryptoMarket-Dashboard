@@ -107,6 +107,7 @@ python main.py
 | `USE_ASYNC_FETCH` | "true" | Enable async parallel fetching |
 | `MAX_CONCURRENT_REQUESTS` | "5" | Max concurrent API requests |
 | `MIN_CORR_DAYS` | "10" | Minimum overlapping days for correlation |
+| `TELEGRAM_BOT_TOKEN` | None | Telegram bot token (required for bot) |
 
 ### Custom Async Configuration
 
@@ -249,7 +250,19 @@ If you hit rate limits:
 
 ## Recent Updates
 
-### Latest Features (v2.3)
+### Latest Features (v2.4) - Telegram Bot
+- **Complete Telegram Bot Implementation**: Full-featured bot for remote dashboard control
+  - Dashboard control (start/stop/restart/status)
+  - Data queries (price, coins, latest, info)
+  - Interactive keyboards and menus
+  - Rate limiting and input validation
+  - Per-user dashboard ownership tracking
+  - Real-time progress updates
+  - Comprehensive documentation in `TELEGRAM_BOT.md`
+  - 25 issues closed and implemented
+  - Code quality improvements and refactoring
+
+### Previous Features (v2.3)
 - **GitHub Pages Deployment**: Added interactive web version deployed on GitHub Pages
   - Simplified JavaScript version focusing on BTC and ETH
   - All core features: smoothing, views, correlation analysis
@@ -317,6 +330,8 @@ If you hit rate limits:
 - `requests>=2.31.0` - HTTP requests
 - `openpyxl>=3.1.0` - Excel export
 - `aiohttp>=3.9.0` - Async HTTP (optional but recommended)
+- `python-telegram-bot>=20.0` - Telegram bot framework
+- `psutil>=5.9.0` - Process management (for bot)
 
 ## License
 

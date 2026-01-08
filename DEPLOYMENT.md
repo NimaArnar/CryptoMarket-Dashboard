@@ -67,10 +67,40 @@ For cloud deployment, you may want to set:
 - `USE_ASYNC_FETCH`: `true` (default)
 - `MAX_CONCURRENT_REQUESTS`: `5` (default)
 
+## Telegram Bot Deployment
+
+The Telegram bot can be deployed alongside the dashboard or separately:
+
+### Option 1: Deploy Bot Separately (Recommended)
+
+1. **Create a separate service** on your hosting platform
+2. **Configure:**
+   - **Start Command**: `python telegram_bot.py`
+   - **Environment Variables**:
+     - `TELEGRAM_BOT_TOKEN`: Your bot token (required)
+     - `COINGECKO_API_KEY`: Optional, for faster API access
+3. **Note**: The bot needs to be able to start the dashboard locally or via SSH
+
+### Option 2: Run Bot Locally
+
+For development or personal use, run the bot on your local machine:
+```powershell
+$env:TELEGRAM_BOT_TOKEN="your-token"
+python telegram_bot.py
+```
+
+### Bot Requirements
+
+- **Python 3.8+**
+- **Dependencies**: `pip install -r requirements.txt`
+- **Network Access**: Bot needs internet access for Telegram API
+- **Local Dashboard**: Bot can start dashboard on same machine
+
 ## Notes
 
 - The app uses port 8052 locally, but cloud platforms will set the `PORT` environment variable
 - Debug mode is disabled in production for security
 - Cache files (`cg_cache/`) will be recreated on each deployment
 - Logs are saved to `logs/` directory
+- Telegram bot logs are saved to `logs/bot_users_YYYYMMDD.log`
 

@@ -58,11 +58,6 @@ start_bot.ps1
 start_bot.bat
 .telegram_bot.lock
 
-# Telegram bot token files (never commit!)
-start_bot.ps1
-start_bot.bat
-.telegram_bot.lock
-
 # Jupyter Notebook
 .ipynb_checkpoints
 
