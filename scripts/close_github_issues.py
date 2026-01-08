@@ -28,7 +28,7 @@ REPO_NAME = "CryptoMarket-Dashboard"
 GITHUB_API_BASE = "https://api.github.com"
 
 # Issues that were fixed
-FIXED_ISSUES = [23, 24, 25]
+FIXED_ISSUES = [19, 23, 24, 25]
 
 # Commit hash (will be updated)
 COMMIT_HASH = "HEAD"
