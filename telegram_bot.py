@@ -1759,16 +1759,16 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if latest_price is None:
             price_text = (
                 f"💰 *{symbol} Price*\n\n"
-                f"💎 Market Cap: ${latest_mc:,.0f}\n"
-                f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n"
-                f"❌ Price data not available\n"
+                f"Market Cap: ${latest_mc:,.0f}\n"
+                f"Date: {latest_date.strftime('%Y-%m-%d')}\n"
+                f"Price data not available\n"
             )
         else:
             price_text = (
                 f"💰 *{symbol} Price*\n\n"
-                f"💵 Price: ${latest_price:,.2f}\n"
-                f"💎 Market Cap: ${latest_mc:,.0f}\n"
-                f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n"
+                f"Price: ${latest_price:,.2f}\n"
+                f"Market Cap: ${latest_mc:,.0f}\n"
+                f"Date: {latest_date.strftime('%Y-%m-%d')}\n"
             )
             
             if change_24h is not None:
@@ -1776,7 +1776,7 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         
         if meta:
             cat, grp = meta
-            price_text += f"📂 Category: {cat}\n"
+            price_text += f"\nCategory: {cat}\n"
         
         # Delete loading message and send result
         if loading_msg:
@@ -1864,13 +1864,13 @@ async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         
         mc_text = (
             f"💎 *{symbol} Market Cap*\n\n"
-            f"💰 Market Cap: ${latest_mc:,.0f}\n"
-            f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n"
+            f"Market Cap: ${latest_mc:,.0f}\n"
+            f"Date: {latest_date.strftime('%Y-%m-%d')}\n"
         )
         
         if symbol in dm.meta:
             cat, grp = dm.meta[symbol]
-            mc_text += f"📂 Category: {cat}\n"
+            mc_text += f"\nCategory: {cat}\n"
         
         if loading_msg:
             try:
@@ -1936,7 +1936,7 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         
         latest_text = f"📊 *Latest Prices*\n"
-        latest_text += f"📅 Date: {dm.df_raw.index[-1].strftime('%Y-%m-%d')}\n\n"
+        latest_text += f"Date: {dm.df_raw.index[-1].strftime('%Y-%m-%d')}\n\n"
         
         # Get top 10 by market cap or show all if less than 10
         from src.app.callbacks import _load_price_data
@@ -1958,16 +1958,16 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 price_series = prices_dict[sym].dropna()
                 if not price_series.empty:
                     price = price_series.iloc[-1]
-                    latest_text += f"💰 {sym}: ${price:,.2f}\n"
+                    latest_text += f"{sym}: ${price:,.2f}\n"
                 else:
                     # Fallback to market cap if no price
                     if sym in dm.series:
                         mc = dm.series[sym].iloc[-1]
-                        latest_text += f"💎 {sym}: MC ${mc:,.0f}\n"
+                        latest_text += f"{sym}: MC ${mc:,.0f}\n"
             elif sym in dm.series:
                 # Fallback to market cap if no price data
                 mc = dm.series[sym].iloc[-1]
-                latest_text += f"💎 {sym}: MC ${mc:,.0f}\n"
+                latest_text += f"{sym}: MC ${mc:,.0f}\n"
         
         if len(dm.symbols_all) > 10:
             latest_text += f"\n... and {len(dm.symbols_all) - 10} more coins"
@@ -1976,7 +1976,7 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if len(latest_text) > BOT_MAX_MESSAGE_LENGTH:
             # Split into multiple messages
             messages = []
-            current_msg = f"📊 *Latest Prices*\n📅 Date: {dm.df_raw.index[-1].strftime('%Y-%m-%d')}\n\n"
+            current_msg = f"📊 *Latest Prices*\nDate: {dm.df_raw.index[-1].strftime('%Y-%m-%d')}\n\n"
             
             for sym in symbols_to_show:
                 line = ""
@@ -1984,13 +1984,13 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     price_series = prices_dict[sym].dropna()
                     if not price_series.empty:
                         price = price_series.iloc[-1]
-                        line = f"💰 {sym}: ${price:,.2f}\n"
+                        line = f"{sym}: ${price:,.2f}\n"
                     elif sym in dm.series:
                         mc = dm.series[sym].iloc[-1]
-                        line = f"💎 {sym}: MC ${mc:,.0f}\n"
+                        line = f"{sym}: MC ${mc:,.0f}\n"
                 elif sym in dm.series:
                     mc = dm.series[sym].iloc[-1]
-                    line = f"💎 {sym}: MC ${mc:,.0f}\n"
+                    line = f"{sym}: MC ${mc:,.0f}\n"
                 
                 if len(current_msg) + len(line) > BOT_MAX_MESSAGE_LENGTH:
                     messages.append(current_msg)
@@ -2101,8 +2101,8 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # Category and group
         if symbol in dm.meta:
             cat, grp = dm.meta[symbol]
-            info_text += f"📂 Category: {cat}\n"
-            info_text += f"🏷️ Group: {grp}\n\n"
+            info_text += f"Category: {cat}\n"
+            info_text += f"Group: {grp}\n\n"
         
         # Latest data
         series = dm.series[symbol]
@@ -2111,8 +2111,8 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         first_mc = series.iloc[0]
         first_date = series.index[0]
         
-        info_text += f"💎 Latest Market Cap: ${latest_mc:,.0f}\n"
-        info_text += f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n\n"
+        info_text += f"Latest Market Cap: ${latest_mc:,.0f}\n"
+        info_text += f"Date: {latest_date.strftime('%Y-%m-%d')}\n"
         
         # Price if available
         from src.app.callbacks import _load_price_data
@@ -2122,13 +2122,15 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             price_series = prices_dict[symbol].dropna()
             if not price_series.empty:
                 latest_price = price_series.iloc[-1]
-                info_text += f"💵 Latest Price: ${latest_price:,.2f}\n\n"
+                info_text += f"Latest Price: ${latest_price:,.2f}\n"
+        
+        info_text += "\n"
         
         # Supply Information
         if coin_id:
             coin_details = await loop.run_in_executor(None, _fetch_coin_details, coin_id)
             if coin_details:
-                info_text += "📊 *Supply Information:*\n"
+                info_text += "📊 *Supply Information*\n"
                 if coin_details.get("circulating_supply"):
                     circ_supply = coin_details["circulating_supply"]
                     # Format large numbers
@@ -2140,7 +2142,7 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                         circ_supply_str = f"{circ_supply / 1e3:.2f}K"
                     else:
                         circ_supply_str = f"{circ_supply:,.0f}"
-                    info_text += f"🪙 Circulating Supply: {circ_supply_str} {symbol}\n"
+                    info_text += f"Circulating Supply: {circ_supply_str} {symbol}\n"
                 
                 if coin_details.get("total_supply"):
                     total_supply = coin_details["total_supply"]
@@ -2152,7 +2154,7 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                         total_supply_str = f"{total_supply / 1e3:.2f}K"
                     else:
                         total_supply_str = f"{total_supply:,.0f}"
-                    info_text += f"📈 Total Supply: {total_supply_str} {symbol}\n"
+                    info_text += f"Total Supply: {total_supply_str} {symbol}\n"
                 info_text += "\n"
         
         # Price Performance
@@ -2170,31 +2172,33 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             all_time_low = price_series.min()
             all_time_low_idx = price_series.idxmin()
             
-            info_text += "📈 *Price Performance:*\n"
-            info_text += f"💰 Current Price: ${current_price:,.2f}\n"
-            info_text += f"📊 Indexed Price (Start = 100): {indexed_price:,.2f}\n"
+            info_text += "📈 *Price Performance*\n"
+            info_text += f"Current Price: ${current_price:,.2f}\n"
+            info_text += f"Indexed Price (Start = 100): {indexed_price:,.2f}\n"
             
-            # Format percentage change
+            # Format percentage change with directional emoji
             change_sign = "+" if price_change_pct >= 0 else ""
-            info_text += f"📈 Change from Start: {change_sign}{price_change_pct:,.2f}%\n"
+            change_emoji = "📈" if price_change_pct >= 0 else "📉"
+            info_text += f"{change_emoji} Change from Start: {change_sign}{price_change_pct:,.2f}%\n"
             
-            info_text += f"📈 All-time High: ${all_time_high:,.2f} ({all_time_high_idx.strftime('%Y-%m-%d')})\n"
-            info_text += f"📉 All-time Low: ${all_time_low:,.2f} ({all_time_low_idx.strftime('%Y-%m-%d')})\n"
+            info_text += f"All-time High: ${all_time_high:,.2f} ({all_time_high_idx.strftime('%Y-%m-%d')})\n"
+            info_text += f"All-time Low: ${all_time_low:,.2f} ({all_time_low_idx.strftime('%Y-%m-%d')})\n"
             info_text += "\n"
         
         # Market Cap Performance
         mc_change_pct = ((latest_mc - first_mc) / first_mc) * 100
-        info_text += "💎 *Market Cap Performance:*\n"
-        info_text += f"📊 Current Market Cap: ${latest_mc:,.0f}\n"
+        info_text += "💎 *Market Cap Performance*\n"
+        info_text += f"Current Market Cap: ${latest_mc:,.0f}\n"
         change_sign = "+" if mc_change_pct >= 0 else ""
-        info_text += f"📈 Change from Start: {change_sign}{mc_change_pct:,.2f}%\n"
+        change_emoji = "📈" if mc_change_pct >= 0 else "📉"
+        info_text += f"{change_emoji} Change from Start: {change_sign}{mc_change_pct:,.2f}%\n"
         info_text += "\n"
         
         # Data Range
-        info_text += "📅 *Data Range:*\n"
-        info_text += f"📅 First Date: {first_date.strftime('%Y-%m-%d')}\n"
-        info_text += f"📅 Last Date: {latest_date.strftime('%Y-%m-%d')}\n"
-        info_text += f"📈 Data Points: {len(series)}\n"
+        info_text += "📅 *Data Range*\n"
+        info_text += f"First Date: {first_date.strftime('%Y-%m-%d')}\n"
+        info_text += f"Last Date: {latest_date.strftime('%Y-%m-%d')}\n"
+        info_text += f"Data Points: {len(series)}\n"
         
         if loading_msg:
             try:
