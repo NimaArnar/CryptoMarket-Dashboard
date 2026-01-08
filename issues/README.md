@@ -35,6 +35,7 @@ This directory contains issue templates for problems found during code review.
 23. **023-help-menu-simplify-buttons.md** - Bug: Help menu should only show 2 buttons (Medium priority) ✅ Fixed
 24. **024-about-button-edit-message.md** - Bug: About button should edit message, not send new (Medium priority) ✅ Fixed
 25. **025-about-screen-single-button.md** - Bug: About screen should only show back button (Medium priority) ✅ Fixed
+26. **026-add-info-button-to-menus.md** - Enhancement: Add Info button to menus (Medium priority)
 
 ## Priority Guide
 
