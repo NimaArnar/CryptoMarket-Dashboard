@@ -7,7 +7,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 from functools import wraps
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -1507,6 +1507,42 @@ async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
+def _fetch_coin_details(coin_id: str) -> Optional[Dict]:
+    """Fetch coin details (circulating supply, total supply) from CoinGecko API."""
+    from src.config import COINGECKO_API_BASE, COINGECKO_API_KEY
+    import requests
+    
+    url = f"{COINGECKO_API_BASE}/coins/{coin_id}"
+    params = {
+        "localization": "false",
+        "tickers": "false",
+        "market_data": "true",
+        "community_data": "false",
+        "developer_data": "false",
+        "sparkline": "false"
+    }
+    
+    headers = {}
+    if COINGECKO_API_KEY:
+        headers["x-cg-pro-api-key"] = COINGECKO_API_KEY
+    
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            market_data = data.get("market_data", {})
+            return {
+                "circulating_supply": market_data.get("circulating_supply"),
+                "total_supply": market_data.get("total_supply"),
+            }
+        else:
+            logger.debug(f"Failed to fetch coin details for {coin_id}: HTTP {r.status_code}")
+            return None
+    except Exception as e:
+        logger.debug(f"Error fetching coin details for {coin_id}: {e}")
+        return None
+
+
 def _load_single_coin_data(symbol: str) -> Tuple[Optional[pd.Series], Optional[pd.Series], Optional[Tuple[str, str]]]:
     """Load data for a single coin only (faster for price/marketcap commands)."""
     from src.config import CACHE_DIR, DAYS_HISTORY, VS_CURRENCY
@@ -2037,6 +2073,14 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
             return
         
+        # Get coin_id for fetching supply data
+        from src.constants import COINS
+        coin_id = None
+        for cid, sym, _, _ in COINS:
+            if sym.upper() == symbol.upper():
+                coin_id = cid
+                break
+        
         info_text = f"📊 *{symbol} Information*\n\n"
         
         # Category and group
@@ -2049,23 +2093,93 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         series = dm.series[symbol]
         latest_mc = series.iloc[-1]
         latest_date = series.index[-1]
+        first_mc = series.iloc[0]
+        first_date = series.index[0]
         
         info_text += f"💎 Latest Market Cap: ${latest_mc:,.0f}\n"
-        info_text += f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n"
+        info_text += f"📅 Date: {latest_date.strftime('%Y-%m-%d')}\n\n"
         
         # Price if available
         from src.app.callbacks import _load_price_data
         prices_dict = _load_price_data()
+        price_series = None
         if symbol in prices_dict:
             price_series = prices_dict[symbol].dropna()
             if not price_series.empty:
                 latest_price = price_series.iloc[-1]
-                info_text += f"💵 Latest Price: ${latest_price:,.2f}\n"
+                info_text += f"💵 Latest Price: ${latest_price:,.2f}\n\n"
         
-        # Data points
+        # Supply Information
+        if coin_id:
+            coin_details = await loop.run_in_executor(None, _fetch_coin_details, coin_id)
+            if coin_details:
+                info_text += "📊 *Supply Information:*\n"
+                if coin_details.get("circulating_supply"):
+                    circ_supply = coin_details["circulating_supply"]
+                    # Format large numbers
+                    if circ_supply >= 1e9:
+                        circ_supply_str = f"{circ_supply / 1e9:.2f}B"
+                    elif circ_supply >= 1e6:
+                        circ_supply_str = f"{circ_supply / 1e6:.2f}M"
+                    elif circ_supply >= 1e3:
+                        circ_supply_str = f"{circ_supply / 1e3:.2f}K"
+                    else:
+                        circ_supply_str = f"{circ_supply:,.0f}"
+                    info_text += f"🪙 Circulating Supply: {circ_supply_str} {symbol}\n"
+                
+                if coin_details.get("total_supply"):
+                    total_supply = coin_details["total_supply"]
+                    if total_supply >= 1e9:
+                        total_supply_str = f"{total_supply / 1e9:.2f}B"
+                    elif total_supply >= 1e6:
+                        total_supply_str = f"{total_supply / 1e6:.2f}M"
+                    elif total_supply >= 1e3:
+                        total_supply_str = f"{total_supply / 1e3:.2f}K"
+                    else:
+                        total_supply_str = f"{total_supply:,.0f}"
+                    info_text += f"📈 Total Supply: {total_supply_str} {symbol}\n"
+                info_text += "\n"
+        
+        # Price Performance
+        if price_series is not None and not price_series.empty:
+            first_price = price_series.iloc[0]
+            current_price = price_series.iloc[-1]
+            
+            # Calculate indexed price (first = 100)
+            indexed_price = (current_price / first_price) * 100
+            price_change_pct = ((current_price - first_price) / first_price) * 100
+            
+            # All-time high/low
+            all_time_high = price_series.max()
+            all_time_high_idx = price_series.idxmax()
+            all_time_low = price_series.min()
+            all_time_low_idx = price_series.idxmin()
+            
+            info_text += "📈 *Price Performance:*\n"
+            info_text += f"💰 Current Price: ${current_price:,.2f}\n"
+            info_text += f"📊 Indexed Price (Start = 100): {indexed_price:,.2f}\n"
+            
+            # Format percentage change
+            change_sign = "+" if price_change_pct >= 0 else ""
+            info_text += f"📈 Change from Start: {change_sign}{price_change_pct:,.2f}%\n"
+            
+            info_text += f"📈 All-time High: ${all_time_high:,.2f} ({all_time_high_idx.strftime('%Y-%m-%d')})\n"
+            info_text += f"📉 All-time Low: ${all_time_low:,.2f} ({all_time_low_idx.strftime('%Y-%m-%d')})\n"
+            info_text += "\n"
+        
+        # Market Cap Performance
+        mc_change_pct = ((latest_mc - first_mc) / first_mc) * 100
+        info_text += "💎 *Market Cap Performance:*\n"
+        info_text += f"📊 Current Market Cap: ${latest_mc:,.0f}\n"
+        change_sign = "+" if mc_change_pct >= 0 else ""
+        info_text += f"📈 Change from Start: {change_sign}{mc_change_pct:,.2f}%\n"
+        info_text += "\n"
+        
+        # Data Range
+        info_text += "📅 *Data Range:*\n"
+        info_text += f"📅 First Date: {first_date.strftime('%Y-%m-%d')}\n"
+        info_text += f"📅 Last Date: {latest_date.strftime('%Y-%m-%d')}\n"
         info_text += f"📈 Data Points: {len(series)}\n"
-        info_text += f"📅 First Date: {series.index[0].strftime('%Y-%m-%d')}\n"
-        info_text += f"📅 Last Date: {series.index[-1].strftime('%Y-%m-%d')}\n"
         
         if loading_msg:
             try:
