@@ -41,6 +41,7 @@ This directory contains issue templates for problems found during code review.
 29. **029-latest-show-all-coins.md** - Enhancement: /latest should show latest price of all coins (Medium priority)
 30. **030-remove-category-from-data-displays.md** - Enhancement: Remove category from data displays - only show in /info (Low priority)
 31. **031-add-timestamp-latest-update.md** - Enhancement: Add timestamp for latest update in relevant sections (Medium priority)
+32. **032-remove-marketcap-command-completely.md** - Enhancement: Remove marketcap command and functions completely (Low priority)
 
 ## Priority Guide
 
