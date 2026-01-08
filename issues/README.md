@@ -36,6 +36,7 @@ This directory contains issue templates for problems found during code review.
 24. **024-about-button-edit-message.md** - Bug: About button should edit message, not send new (Medium priority) ✅ Fixed
 25. **025-about-screen-single-button.md** - Bug: About screen should only show back button (Medium priority) ✅ Fixed
 26. **026-add-info-button-to-menus.md** - Enhancement: Add Info button to menus (Medium priority)
+27. **027-reduce-emojis-in-data-display.md** - Enhancement: Reduce emojis in data display - too crowded (Medium priority)
 
 ## Priority Guide
 
