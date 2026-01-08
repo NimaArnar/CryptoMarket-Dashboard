@@ -1742,12 +1742,19 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                     change_24h = ((latest_price - prev_price) / prev_price) * 100
                     change_emoji = "📈" if change_24h >= 0 else "📉"
         
+        # Format timestamp
+        if hasattr(latest_date, 'hour'):
+            timestamp_str = latest_date.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            timestamp_str = latest_date.strftime('%Y-%m-%d') + " (date only)"
+        
         # If no price data, show market cap only
         if latest_price is None:
             price_text = (
                 f"💰 *{symbol} Price*\n\n"
                 f"Market Cap: ${latest_mc:,.0f}\n"
                 f"Date: {latest_date.strftime('%Y-%m-%d')}\n"
+                f"Last updated: {timestamp_str}\n"
                 f"Price data not available\n"
             )
         else:
@@ -1756,14 +1763,11 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 f"Price: ${latest_price:,.2f}\n"
                 f"Market Cap: ${latest_mc:,.0f}\n"
                 f"Date: {latest_date.strftime('%Y-%m-%d')}\n"
+                f"Last updated: {timestamp_str}\n"
             )
             
             if change_24h is not None:
                 price_text += f"{change_emoji} 24h Change: {change_24h:+.2f}%\n"
-        
-        if meta:
-            cat, grp = meta
-            price_text += f"\nCategory: {cat}\n"
         
         # Delete loading message and send result
         if loading_msg:
@@ -1830,22 +1834,21 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         
         latest_text = f"📊 *Latest Prices*\n"
-        latest_text += f"Date: {dm.df_raw.index[-1].strftime('%Y-%m-%d')}\n\n"
+        latest_date = dm.df_raw.index[-1]
+        latest_text += f"Date: {latest_date.strftime('%Y-%m-%d')}\n"
+        # Add timestamp if available
+        if hasattr(latest_date, 'hour'):
+            latest_text += f"Last updated: {latest_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        else:
+            # If only date is available, use current time or date
+            latest_text += f"Last updated: {latest_date.strftime('%Y-%m-%d')} (date only)\n"
+        latest_text += "\n"
         
-        # Get top 10 by market cap or show all if less than 10
+        # Show ALL coins (not just top 10)
         from src.app.callbacks import _load_price_data
         prices_dict = _load_price_data()
         
-        if len(dm.symbols_all) <= 10:
-            symbols_to_show = dm.symbols_all
-        else:
-            # Sort by latest market cap
-            latest_mcs = {}
-            for sym in dm.symbols_all:
-                if sym in dm.series:
-                    latest_mcs[sym] = dm.series[sym].iloc[-1]
-            symbols_to_show = sorted(latest_mcs.keys(), key=lambda x: latest_mcs[x], reverse=True)[:10]
-            latest_text += "*Top 10 by Market Cap:*\n\n"
+        symbols_to_show = dm.symbols_all
         
         for sym in symbols_to_show:
             if sym in prices_dict:
@@ -1863,14 +1866,18 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 mc = dm.series[sym].iloc[-1]
                 latest_text += f"{sym}: MC ${mc:,.0f}\n"
         
-        if len(dm.symbols_all) > 10:
-            latest_text += f"\n... and {len(dm.symbols_all) - 10} more coins"
-        
         # Check message length and split if needed
         if len(latest_text) > BOT_MAX_MESSAGE_LENGTH:
             # Split into multiple messages
             messages = []
-            current_msg = f"📊 *Latest Prices*\nDate: {dm.df_raw.index[-1].strftime('%Y-%m-%d')}\n\n"
+            latest_date = dm.df_raw.index[-1]
+            header = f"📊 *Latest Prices*\nDate: {latest_date.strftime('%Y-%m-%d')}\n"
+            if hasattr(latest_date, 'hour'):
+                header += f"Last updated: {latest_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            else:
+                header += f"Last updated: {latest_date.strftime('%Y-%m-%d')} (date only)\n"
+            header += "\n"
+            current_msg = header
             
             for sym in symbols_to_show:
                 line = ""
@@ -2005,8 +2012,15 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         first_mc = series.iloc[0]
         first_date = series.index[0]
         
+        # Format timestamp
+        if hasattr(latest_date, 'hour'):
+            timestamp_str = latest_date.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            timestamp_str = latest_date.strftime('%Y-%m-%d') + " (date only)"
+        
         info_text += f"Latest Market Cap: ${latest_mc:,.0f}\n"
         info_text += f"Date: {latest_date.strftime('%Y-%m-%d')}\n"
+        info_text += f"Last updated: {timestamp_str}\n"
         
         # Price if available
         from src.app.callbacks import _load_price_data
