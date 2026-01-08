@@ -182,10 +182,6 @@ def create_data_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("💵 Price (ETH)", callback_data="price_ETH")
         ],
         [
-            InlineKeyboardButton("💎 Market Cap (BTC)", callback_data="marketcap_BTC"),
-            InlineKeyboardButton("💎 Market Cap (ETH)", callback_data="marketcap_ETH")
-        ],
-        [
             InlineKeyboardButton("📊 Info (BTC)", callback_data="info_BTC"),
             InlineKeyboardButton("📊 Info (ETH)", callback_data="info_ETH")
         ],
