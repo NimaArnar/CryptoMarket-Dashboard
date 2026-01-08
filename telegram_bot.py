@@ -354,7 +354,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "*/status* - Check if dashboard is running\n\n"
             "💰 *Data Queries:*\n"
             "*/price <SYMBOL>* - Get latest price (e.g., /price BTC)\n"
-            "*/marketcap <SYMBOL>* - Get market cap (e.g., /marketcap ETH)\n"
             "*/coins* - List all available coins\n"
             "*/latest* - Latest prices for all coins\n"
             "*/info <SYMBOL>* - Detailed coin information\n\n"
@@ -444,13 +443,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await price_command(cmd_update, context)
         return
     
-    elif data.startswith("marketcap_"):
-        symbol = data.split("_")[1]
-        context.args = [symbol]
-        cmd_update = UpdateClass(update_id=update.update_id, message=query.message)
-        await marketcap_command(cmd_update, context)
-        return
-    
     elif data.startswith("info_"):
         symbol = data.split("_")[1]
         context.args = [symbol]
@@ -473,7 +465,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "🤖 *Crypto Market Dashboard Bot*\n\n"
         "Welcome! Use the buttons below to control your dashboard and get crypto data.\n\n"
         "You can also use commands directly:\n"
-        "/run, /stop, /restart, /status, /price, /marketcap, /coins, /latest, /info, /help"
+        "/run, /stop, /restart, /status, /price, /coins, /latest, /info, /help"
     )
     
     keyboard = create_main_keyboard()
@@ -569,7 +561,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "*/status* - Check if dashboard is running\n\n"
         "💰 *Data Queries:*\n"
         "*/price <SYMBOL>* - Get latest price (e.g., /price BTC)\n"
-        "*/marketcap <SYMBOL>* - Get market cap (e.g., /marketcap ETH)\n"
         "*/coins* - List all available coins\n"
         "*/latest* - Latest prices for all coins\n"
         "*/info <SYMBOL>* - Detailed coin information\n\n"
@@ -1555,7 +1546,7 @@ def _fetch_coin_details(coin_id: str) -> Optional[Dict]:
 
 
 def _load_single_coin_data(symbol: str) -> Tuple[Optional[pd.Series], Optional[pd.Series], Optional[Tuple[str, str]]]:
-    """Load data for a single coin only (faster for price/marketcap commands)."""
+    """Load data for a single coin only (faster for price command)."""
     from src.config import CACHE_DIR, DAYS_HISTORY, VS_CURRENCY
     from src.constants import COINS
     from src.data.fetcher import fetch_market_caps_retry
@@ -1785,99 +1776,6 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         
     except Exception as e:
         logger.error(f"Error getting price for {symbol}: {e}")
-        if loading_msg:
-            try:
-                await loading_msg.delete()
-            except Exception as e:
-                logger.debug(f"Could not delete loading message: {e}")
-                pass
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-
-@rate_limit(max_calls=15, period=60)
-async def marketcap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /marketcap command - get market cap for a coin."""
-    # Track user action
-    symbol = context.args[0].upper() if context.args and len(context.args) > 0 else "none"
-    log_user_action(update, "command", f"/marketcap {symbol}")
-    
-    if not context.args:
-        await update.message.reply_text("❌ Please specify a coin symbol. Example: /marketcap BTC")
-        return
-    
-    symbol = context.args[0].upper()
-    
-    # Validate symbol format
-    if not validate_symbol(symbol):
-        await update.message.reply_text(
-            "❌ Invalid symbol format.\n\n"
-            "💡 Symbol must be 1-10 alphanumeric characters.\n"
-            "Example: BTC, ETH, DOGE"
-        )
-        return
-    
-    # Check if dashboard is running
-    if not _check_dashboard_running():
-        await update.message.reply_text(
-            "⚠️ *Dashboard is offline*\n\n"
-            "💡 The dashboard needs to be running to access data.\n"
-            "Use /run to start the dashboard first."
-        )
-        return
-    loading_msg = None
-    
-    try:
-        loading_msg = await update.message.reply_text("🔄 Loading data...\n⏳ This may take a few seconds...")
-        import asyncio
-        loop = asyncio.get_event_loop()
-        
-        # Load data asynchronously in executor (non-blocking)
-        async def update_progress():
-            await asyncio.sleep(2)
-            if loading_msg:
-                try:
-                    await loading_msg.edit_text("🔄 Loading data...\n⏳ Processing cached data...")
-                except Exception:
-                    pass
-        
-        # Start progress update task
-        progress_task = asyncio.create_task(update_progress())
-        
-        # Load data in executor (non-blocking)
-        dm = await loop.run_in_executor(None, _load_data_manager)
-        
-        # Cancel progress update if still running
-        progress_task.cancel()
-        
-        if symbol not in dm.series:
-            await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
-            return
-        
-        # Market cap is stored in the series
-        series = dm.series[symbol]
-        latest_mc = series.iloc[-1]
-        latest_date = series.index[-1]
-        
-        mc_text = (
-            f"💎 *{symbol} Market Cap*\n\n"
-            f"Market Cap: ${latest_mc:,.0f}\n"
-            f"Date: {latest_date.strftime('%Y-%m-%d')}\n"
-        )
-        
-        if symbol in dm.meta:
-            cat, grp = dm.meta[symbol]
-            mc_text += f"\nCategory: {cat}\n"
-        
-        if loading_msg:
-            try:
-                await loading_msg.delete()
-            except Exception as e:
-                logger.debug(f"Could not delete loading message: {e}")
-                pass
-        await update.message.reply_text(mc_text, parse_mode="Markdown")
-            
-    except Exception as e:
-        logger.error(f"Error getting market cap for {symbol}: {e}")
         if loading_msg:
             try:
                 await loading_msg.delete()
@@ -2352,7 +2250,6 @@ async def main_async() -> None:
             BotCommand("restart", "Restart the dashboard server"),
             BotCommand("status", "Check if dashboard is running"),
             BotCommand("price", "Get latest price for a coin (e.g., /price BTC)"),
-            BotCommand("marketcap", "Get market cap for a coin (e.g., /marketcap ETH)"),
             BotCommand("coins", "List all available coins"),
             BotCommand("latest", "Get latest prices for all coins"),
             BotCommand("info", "Get detailed information for a coin (e.g., /info BTC)"),
@@ -2390,7 +2287,6 @@ async def main_async() -> None:
     
     # Data query handlers
     application.add_handler(CommandHandler("price", price_command))
-    application.add_handler(CommandHandler("marketcap", marketcap_command))
     application.add_handler(CommandHandler("coins", coins_command))
     application.add_handler(CommandHandler("latest", latest_command))
     application.add_handler(CommandHandler("info", info_command))
