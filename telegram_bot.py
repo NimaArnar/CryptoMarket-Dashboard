@@ -2566,6 +2566,8 @@ def _fetch_hourly_price_data(coin_id: str, days: int) -> Optional[pd.Series]:
             df = df.sort_values("date")
             
             # Set datetime index and return price series
+            # Ensure price column is float64 to preserve precision for small values
+            df["price"] = df["price"].astype("float64")
             price_series = df.set_index("date")["price"].sort_index()
             return price_series
         else:
@@ -2622,6 +2624,15 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
         if timeframe_data.empty or len(timeframe_data) < 2:
             return None
         
+        # Ensure data is float64 to preserve precision for small values
+        timeframe_data = timeframe_data.astype("float64")
+        
+        # Filter out any zero or negative values (data quality check)
+        timeframe_data = timeframe_data[timeframe_data > 0]
+        if timeframe_data.empty or len(timeframe_data) < 2:
+            logger.warning(f"No valid positive price data for {symbol}")
+            return None
+        
         # Calculate indexed price (normalized to start at 100)
         first_price = timeframe_data.iloc[0]
         indexed_price = (timeframe_data / first_price) * 100
@@ -2629,6 +2640,14 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
         # Determine appropriate decimal precision based on price range
         max_price = timeframe_data.max()
         min_price = timeframe_data.min()
+        
+        # Log price range for debugging
+        logger.debug(f"Chart for {symbol}: min=${min_price:.8f}, max=${max_price:.8f}, count={len(timeframe_data)}")
+        
+        # Verify we have valid data (not all zeros)
+        if timeframe_data.sum() == 0 or all(v == 0 for v in timeframe_data.values):
+            logger.error(f"All price values are zero for {symbol} - cannot generate chart")
+            return None
         
         # Determine tick format and hover precision based on price magnitude
         if max_price < 0.01:
@@ -2665,9 +2684,12 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
             xaxis_title = 'Date'
         
         # Add price trace (left Y-axis)
+        # Ensure values are float64 and not rounded
+        price_values = timeframe_data.values.astype("float64")
+        
         fig.add_trace(go.Scatter(
             x=timeframe_data.index,
-            y=timeframe_data.values,
+            y=price_values,  # Use explicitly typed values
             mode='lines',
             name=f'{symbol} Price',
             line=dict(width=2, color='#1f77b4'),
@@ -2716,7 +2738,9 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
                 side='left',
                 showgrid=True,
                 gridcolor='rgba(128,128,128,0.2)',
-                tickformat=tick_format
+                tickformat=tick_format,
+                # For very small values, use exponent format which works better with log scales
+                exponentformat='power' if max_price < 0.01 else 'none'
             ),
             yaxis2=dict(
                 title='Index (100 = start)',
