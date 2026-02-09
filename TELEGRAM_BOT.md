@@ -153,11 +153,11 @@ Or manually via BotFather:
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `/price <SYMBOL>` | Get latest price | `/price BTC` |
-| `/marketcap <SYMBOL>` | Get market cap | `/marketcap ETH` |
+| `/price <SYMBOL>` | **Instant live price** from CoinGecko (no dashboard needed) | `/price BTC` |
 | `/coins` | List all available coins | `/coins` |
-| `/latest` | Latest prices (top 10) | `/latest` |
-| `/info <SYMBOL>` | Detailed coin info | `/info DOGE` |
+| `/latest` | **Live prices for all coins** | `/latest` |
+| `/info <SYMBOL>` | Detailed coin info using dashboard history | `/info DOGE` |
+| `/summary <SYMBOL> [1d\|1w\|1m\|1y]` | 1d/1w/1m/1y price & market cap summary | `/summary BTC`, `/summary ETH 1m` |
 
 ### Navigation
 
@@ -179,15 +179,43 @@ Bot: 🔄 Starting dashboard...
      🌐 Network: http://192.168.1.100:8052/
 ```
 
-### Querying Prices
+### Querying Instant Prices
 
 ```
 User: /price BTC
 Bot: 💰 BTC Price
-     💵 Price: $43,250.00
-     💎 Market Cap: $850,234,567,890
-     📅 Date: 2026-01-01
+     Price: $43,250.00
+     Market Cap: $850.23B
+     24h Volume: $35.10B
      📈 24h Change: +2.45%
+     
+     Last updated: 2026-01-01 12:34:56 UTC
+```
+
+### Timeframe Summary (1d, 1w, 1m, 1y)
+
+```
+User: /summary BTC
+Bot: 📊 BTC Summary
+
+     Latest Price/Market Cap as of 2026-02-09:
+     Price: $70,000.00
+     Market Cap: $1.39T
+
+     ⏱ 1 Month
+     📉 Price: -23.62%  ($-21,378.17, 2026-01-10 → 2026-02-09)
+        $91,378.17 → $70,000.00
+     📉 Market Cap: -23.37%  ($-422,433,874,365, 2026-01-10 → 2026-02-09)
+        $1.81T → $1.39T
+
+     ⏱ 1 Year
+     📈 Price: +89.67%  ($+32,000.00, 2025-02-09 → 2026-02-09)
+        $38,000.00 → $70,000.00
+        Low (1y): $28,500.00  |  High (1y): $48,900.00
+     📈 Market Cap: +92.10%  ($+667,000,000,000, 2025-02-09 → 2026-02-09)
+        $0.72T → $1.39T
+
+     Last updated: 2026-02-09 12:34:56
 ```
 
 ### Checking Status
