@@ -27,6 +27,7 @@ wheels/
 cg_cache/
 logs/
 market_caps Data/
+charts/
 
 # IDE
 .vscode/

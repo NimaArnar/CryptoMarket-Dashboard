@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict
 
 import pandas as pd
+import plotly.graph_objects as go
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram import Update as UpdateClass
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
@@ -363,7 +364,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "*/coins* - List all available coins\n"
             "*/latest* - Live prices for all coins\n"
             "*/info <SYMBOL>* - Detailed coin information\n"
-            "*/summary <SYMBOL> [1d|1w|1m|1y]* - Timeframe summary\n\n"
+            "*/summary <SYMBOL> [1d|1w|1m|1y]* - Timeframe summary\n"
+            "*/chart <SYMBOL> [1w|1m|1y]* - Price & index chart image\n\n"
             f"🌐 Dashboard: http://127.0.0.1:{DASH_PORT}/"
         )
         
@@ -466,6 +468,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Edit the existing message instead of sending a new one
         await coins_command_edit(query, context, int(page))
         return
+    
+    # Chart timeframe switching
+    elif data.startswith("chart_"):
+        # Format: chart_SYMBOL_TIMEFRAME
+        parts = data.split("_")
+        if len(parts) >= 3:
+            symbol = parts[1]
+            timeframe = parts[2]
+            context.args = [symbol, timeframe]
+            cmd_update = create_update_from_query()
+            await chart_command(cmd_update, context)
+        return
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -474,7 +488,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "🤖 *Crypto Market Dashboard Bot*\n\n"
         "Welcome! Use the buttons below to control your dashboard and get crypto data.\n\n"
         "You can also use commands directly:\n"
-        "/run, /stop, /restart, /status, /price, /coins, /latest, /info, /help"
+        "/run, /stop, /restart, /status, /price, /coins, /latest, /info, /summary, /chart, /help"
     )
     
     keyboard = create_main_keyboard()
@@ -573,7 +587,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "*/coins* - List all available coins\n"
         "*/latest* - Live prices for all coins\n"
         "*/info <SYMBOL>* - Detailed coin information\n"
-        "*/summary <SYMBOL> [1d|1w|1m|1y]* - Timeframe summary\n\n"
+        "*/summary <SYMBOL> [1d|1w|1m|1y]* - Timeframe summary\n"
+        "*/chart <SYMBOL> [1w|1m|1y]* - Price & index chart image\n\n"
         f"🌐 Dashboard: http://127.0.0.1:{DASH_PORT}/"
     )
     await update.message.reply_text(
@@ -2464,6 +2479,319 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
+def _generate_chart_image(symbol: str, price_series: pd.Series, timeframe: str, days: int) -> Optional[Path]:
+    """Generate a chart image with dual Y-axes (price on left, indexed on right), both logarithmic.
+    
+    Args:
+        symbol: Coin symbol
+        price_series: Price series with date index
+        timeframe: Label for timeframe ("1w", "1m", "1y")
+        days: Number of days to show
+    
+    Returns:
+        Path to generated PNG file or None on error
+    """
+    try:
+        # Slice data for timeframe
+        if price_series.empty:
+            return None
+        
+        price_series = price_series.sort_index().dropna()
+        if price_series.empty:
+            return None
+        
+        end_date = price_series.index[-1]
+        start_date = end_date - pd.Timedelta(days=days)
+        
+        # Filter to timeframe
+        timeframe_data = price_series[price_series.index >= start_date].dropna()
+        if timeframe_data.empty or len(timeframe_data) < 2:
+            return None
+        
+        # Calculate indexed price (normalized to start at 100)
+        first_price = timeframe_data.iloc[0]
+        indexed_price = (timeframe_data / first_price) * 100
+        
+        # Create figure with dual Y-axes
+        fig = go.Figure()
+        
+        # Add price trace (left Y-axis)
+        fig.add_trace(go.Scatter(
+            x=timeframe_data.index,
+            y=timeframe_data.values,
+            mode='lines',
+            name=f'{symbol} Price',
+            line=dict(width=2, color='#1f77b4'),
+            yaxis='y',
+            hovertemplate='<b>%{fullData.name}</b><br>' +
+                         'Date: %{x|%Y-%m-%d}<br>' +
+                         'Price: $%{y:,.2f}<extra></extra>'
+        ))
+        
+        # Add indexed price trace (right Y-axis)
+        fig.add_trace(go.Scatter(
+            x=indexed_price.index,
+            y=indexed_price.values,
+            mode='lines',
+            name=f'{symbol} Index',
+            line=dict(width=2, color='#ff7f0e', dash='dash'),
+            yaxis='y2',
+            hovertemplate='<b>%{fullData.name}</b><br>' +
+                         'Date: %{x|%Y-%m-%d}<br>' +
+                         'Index: %{y:.2f}<extra></extra>'
+        ))
+        
+        # Format timeframe label
+        timeframe_labels = {
+            "1w": "1 Week",
+            "1m": "1 Month",
+            "1y": "1 Year"
+        }
+        timeframe_label = timeframe_labels.get(timeframe, timeframe)
+        
+        # Update layout with dual Y-axes (both logarithmic)
+        fig.update_layout(
+            title=dict(
+                text=f'{symbol} Price & Index - Last {timeframe_label}',
+                font=dict(size=16)
+            ),
+            xaxis=dict(
+                title='Date',
+                type='date',
+                showgrid=True,
+                gridcolor='rgba(128,128,128,0.2)'
+            ),
+            yaxis=dict(
+                title='Price (USD)',
+                type='log',
+                side='left',
+                showgrid=True,
+                gridcolor='rgba(128,128,128,0.2)',
+                tickformat='$,.0f'
+            ),
+            yaxis2=dict(
+                title='Index (100 = start)',
+                type='log',
+                side='right',
+                overlaying='y',
+                showgrid=False,
+                tickformat='.1f'
+            ),
+            hovermode='x unified',
+            template='plotly_white',
+            width=1200,
+            height=600,
+            margin=dict(l=80, r=80, t=60, b=60),
+            legend=dict(
+                x=0.02,
+                y=0.98,
+                bgcolor='rgba(255,255,255,0.8)',
+                bordercolor='rgba(0,0,0,0.2)',
+                borderwidth=1
+            )
+        )
+        
+        # Create charts directory if it doesn't exist
+        charts_dir = PROJECT_ROOT / "charts"
+        charts_dir.mkdir(exist_ok=True)
+        
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        chart_filename = f"{symbol}_{timeframe}_{timestamp}.png"
+        chart_path = charts_dir / chart_filename
+        
+        # Export to PNG using kaleido
+        try:
+            fig.write_image(str(chart_path), engine='kaleido', width=1200, height=600, scale=2)
+            logger.debug(f"Chart saved to {chart_path}")
+            return chart_path
+        except Exception as e:
+            logger.error(f"Failed to export chart image: {e}")
+            # Check if kaleido is installed
+            try:
+                import kaleido
+            except ImportError:
+                logger.error("kaleido not installed. Install with: pip install kaleido")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error generating chart for {symbol}: {e}")
+        return None
+
+
+@rate_limit(max_calls=10, period=60)
+async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /chart command - generate and send chart image with dual Y-axes (price + indexed)."""
+    # Parse args
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Please specify a coin symbol and optional timeframe.\n\n"
+            "Examples:\n"
+            "/chart BTC\n"
+            "/chart BTC 1w\n"
+            "/chart ETH 1m\n"
+            "/chart DOGE 1y"
+        )
+        return
+    
+    symbol = context.args[0].upper()
+    timeframe_arg = context.args[1].lower() if len(context.args) > 1 else "1y"
+    
+    # Track user action
+    log_user_action(update, "command", f"/chart {symbol} {timeframe_arg}")
+    
+    # Validate symbol format
+    if not validate_symbol(symbol):
+        await update.message.reply_text(
+            "❌ Invalid symbol format.\n\n"
+            "💡 Symbol must be 1-10 alphanumeric characters.\n"
+            "Example: BTC, ETH, DOGE"
+        )
+        return
+    
+    # Validate timeframe
+    valid_timeframes = {"1w": 7, "1m": 30, "1y": 365}
+    if timeframe_arg not in valid_timeframes:
+        await update.message.reply_text(
+            "❌ Invalid timeframe.\n\n"
+            "Supported timeframes: 1w, 1m, 1y\n"
+            "Examples:\n"
+            "/chart BTC\n"
+            "/chart BTC 1w\n"
+            "/chart ETH 1m"
+        )
+        return
+    
+    days = valid_timeframes[timeframe_arg]
+    
+    # Require dashboard data
+    if not _check_dashboard_running():
+        await update.message.reply_text(
+            "⚠️ *Dashboard is offline*\n\n"
+            "💡 The dashboard needs to be running to access historical data.\n"
+            "Use /run to start the dashboard first."
+        )
+        return
+    
+    loading_msg = None
+    try:
+        loading_msg = await create_loading_message(update)
+        loop = asyncio.get_event_loop()
+        
+        # Load data manager
+        dm = await loop.run_in_executor(None, _load_data_manager)
+        
+        if symbol not in dm.series:
+            await safe_delete_loading_message(loading_msg)
+            await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
+            return
+        
+        # Load price data
+        from src.app.callbacks import _load_price_data
+        
+        prices_dict = _load_price_data()
+        price_series = prices_dict.get(symbol)
+        
+        if price_series is None or price_series.empty:
+            await safe_delete_loading_message(loading_msg)
+            await update.message.reply_text(
+                f"❌ No price data available for {symbol}.\n\n"
+                "💡 Price data may not be loaded yet. Try again after dashboard finishes loading."
+            )
+            return
+        
+        price_series = price_series.dropna().sort_index()
+        
+        # Generate chart image
+        await loading_msg.edit_text("🔄 Generating chart...\n⏳ Creating image...")
+        
+        chart_path = await loop.run_in_executor(
+            None, 
+            _generate_chart_image, 
+            symbol, 
+            price_series, 
+            timeframe_arg, 
+            days
+        )
+        
+        if chart_path is None or not chart_path.exists():
+            await safe_delete_loading_message(loading_msg)
+            await update.message.reply_text(
+                f"❌ Failed to generate chart for {symbol}.\n\n"
+                "💡 Make sure kaleido is installed: pip install kaleido"
+            )
+            return
+        
+        # Build caption
+        timeframe_labels = {"1w": "1 Week", "1m": "1 Month", "1y": "1 Year"}
+        timeframe_label = timeframe_labels.get(timeframe_arg, timeframe_arg)
+        
+        latest_price = price_series.iloc[-1]
+        latest_date = price_series.index[-1]
+        
+        # Calculate date range
+        end_date = price_series.index[-1]
+        start_date = end_date - pd.Timedelta(days=days)
+        timeframe_data = price_series[price_series.index >= start_date].dropna()
+        
+        if not timeframe_data.empty:
+            first_price = timeframe_data.iloc[0]
+            first_date = timeframe_data.index[0]
+            high_price = timeframe_data.max()
+            low_price = timeframe_data.min()
+            
+            caption = (
+                f"📈 *{symbol} Price & Index - Last {timeframe_label}*\n\n"
+                f"📅 {first_date.strftime('%Y-%m-%d')} → {latest_date.strftime('%Y-%m-%d')}\n\n"
+                f"💵 Current Price: ${latest_price:,.2f}\n"
+                f"📊 High: ${high_price:,.2f}  |  Low: ${low_price:,.2f}\n\n"
+                f"📈 Left axis: Price (USD, log scale)\n"
+                f"📊 Right axis: Index (100 = start, log scale)\n\n"
+                f"Last updated: {format_timestamp(latest_date)}"
+            )
+        else:
+            caption = (
+                f"📈 *{symbol} Price & Index - Last {timeframe_label}*\n\n"
+                f"Last updated: {format_timestamp(latest_date)}"
+            )
+        
+        # Create keyboard with timeframe options
+        keyboard_buttons = []
+        timeframe_row = []
+        for tf in ["1w", "1m", "1y"]:
+            if tf != timeframe_arg:
+                timeframe_row.append(InlineKeyboardButton(
+                    tf.upper(), 
+                    callback_data=f"chart_{symbol}_{tf}"
+                ))
+        if timeframe_row:
+            keyboard_buttons.append(timeframe_row)
+        keyboard_buttons.append([InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")])
+        keyboard = InlineKeyboardMarkup(keyboard_buttons) if keyboard_buttons else None
+        
+        # Send chart image
+        await safe_delete_loading_message(loading_msg)
+        
+        with open(chart_path, 'rb') as photo:
+            await update.message.reply_photo(
+                photo=photo,
+                caption=caption,
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+        
+        # Clean up chart file
+        try:
+            chart_path.unlink()
+        except Exception as e:
+            logger.debug(f"Could not delete chart file: {e}")
+        
+    except Exception as e:
+        logger.error(f"Error generating chart for {symbol}: {e}")
+        await safe_delete_loading_message(loading_msg)
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle unknown commands."""
     # Track user action
@@ -2605,6 +2933,7 @@ async def main_async() -> None:
             BotCommand("latest", "Live prices for all coins"),
             BotCommand("info", "Get detailed information for a coin (e.g., /info BTC)"),
             BotCommand("summary", "1d/1w/1m/1y price & market cap summary"),
+            BotCommand("chart", "Price & index chart (1w/1m/1y, e.g., /chart BTC 1m)"),
         ]
         await application.bot.set_my_commands(commands)
         logger.info("Bot commands registered successfully")
@@ -2643,6 +2972,7 @@ async def main_async() -> None:
     application.add_handler(CommandHandler("latest", latest_command))
     application.add_handler(CommandHandler("info", info_command))
     application.add_handler(CommandHandler("summary", summary_command))
+    application.add_handler(CommandHandler("chart", chart_command))
     
     # Unknown command handler (must be last to catch unhandled commands)
     # This catches any command that starts with / but isn't handled above
