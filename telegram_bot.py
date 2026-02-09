@@ -2626,6 +2626,32 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
         first_price = timeframe_data.iloc[0]
         indexed_price = (timeframe_data / first_price) * 100
         
+        # Determine appropriate decimal precision based on price range
+        max_price = timeframe_data.max()
+        min_price = timeframe_data.min()
+        
+        # Determine tick format and hover precision based on price magnitude
+        if max_price < 0.01:
+            # Very small prices (< $0.01): use 6 decimal places
+            tick_format = '$,.6f'
+            hover_precision = 6
+        elif max_price < 0.1:
+            # Small prices (< $0.1): use 4 decimal places
+            tick_format = '$,.4f'
+            hover_precision = 4
+        elif max_price < 1:
+            # Prices < $1: use 3 decimal places
+            tick_format = '$,.3f'
+            hover_precision = 3
+        elif max_price < 1000:
+            # Prices < $1000: use 2 decimal places
+            tick_format = '$,.2f'
+            hover_precision = 2
+        else:
+            # Large prices: use 0 decimal places (whole dollars)
+            tick_format = '$,.0f'
+            hover_precision = 2  # Still show 2 decimals in hover
+        
         # Create figure with dual Y-axes
         fig = go.Figure()
         
@@ -2648,7 +2674,7 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
             yaxis='y',
             hovertemplate=f'<b>%{{fullData.name}}</b><br>' +
                          f'Date: %{{x|{date_format}}}<br>' +
-                         'Price: $%{y:,.2f}<extra></extra>'
+                         f'Price: $%{{y:,.{hover_precision}f}}<extra></extra>'
         ))
         
         # Add indexed price trace (right Y-axis)
@@ -2690,7 +2716,7 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
                 side='left',
                 showgrid=True,
                 gridcolor='rgba(128,128,128,0.2)',
-                tickformat='$,.0f'
+                tickformat=tick_format
             ),
             yaxis2=dict(
                 title='Index (100 = start)',
@@ -2882,11 +2908,24 @@ async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             high_price = timeframe_data.max()
             low_price = timeframe_data.min()
             
+            # Determine appropriate decimal precision for caption based on price range
+            max_price_caption = max(high_price, latest_price, abs(first_price))
+            if max_price_caption < 0.01:
+                price_format = ',.6f'  # 6 decimal places for very small prices
+            elif max_price_caption < 0.1:
+                price_format = ',.4f'  # 4 decimal places for small prices
+            elif max_price_caption < 1:
+                price_format = ',.3f'  # 3 decimal places for prices < $1
+            elif max_price_caption < 1000:
+                price_format = ',.2f'  # 2 decimal places for normal prices
+            else:
+                price_format = ',.2f'  # 2 decimal places for large prices (still show cents)
+            
             caption = (
                 f"📈 *{symbol} Price & Index - Last {timeframe_label}{resolution_note}*\n\n"
                 f"📅 {first_date.strftime(date_format)} → {latest_date.strftime(date_format)}\n\n"
-                f"💵 Current Price: ${latest_price:,.2f}\n"
-                f"📊 High: ${high_price:,.2f}  |  Low: ${low_price:,.2f}\n\n"
+                f"💵 Current Price: ${latest_price:{price_format}}\n"
+                f"📊 High: ${high_price:{price_format}}  |  Low: ${low_price:{price_format}}\n\n"
                 f"📈 Left axis: Price (USD, log scale)\n"
                 f"📊 Right axis: Index (100 = start, log scale)\n\n"
                 f"Last updated: {format_timestamp(latest_date)}"
