@@ -2580,7 +2580,7 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
     """Generate a chart image with dual Y-axes (price on left, indexed on right), both logarithmic.
     
     Uses best resolution available:
-    - 1w/1m: Fetches hourly data from CoinGecko, resamples to 4-hourly
+    - 1w/1m: Fetches hourly data from CoinGecko (uses hourly data directly)
     - 1y: Uses daily data from DataManager
     
     Args:
@@ -2594,22 +2594,16 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
         Path to generated PNG file or None on error
     """
     try:
-        # For 1w and 1m, fetch hourly data and resample to 4-hourly
+        # For 1w and 1m, fetch hourly data and use it directly
         if timeframe in ("1w", "1m"):
             hourly_data = _fetch_hourly_price_data(coin_id, days)
             if hourly_data is None or hourly_data.empty:
                 logger.warning(f"Could not fetch hourly data for {symbol}, falling back to daily")
                 # Fall back to daily data
-                hourly_data = price_series.sort_index().dropna()
+                timeframe_data = price_series.sort_index().dropna()
             else:
-                # Resample hourly data to 4-hourly intervals
-                # Use 'mean' to average prices within each 4-hour window
-                hourly_data = hourly_data.sort_index()
-                timeframe_data = hourly_data.resample('4H').mean().dropna()
-                
-                if timeframe_data.empty or len(timeframe_data) < 2:
-                    logger.warning(f"Not enough 4-hourly data for {symbol}, using hourly")
-                    timeframe_data = hourly_data
+                # Use hourly data directly (no resampling)
+                timeframe_data = hourly_data.sort_index().dropna()
         else:
             # For 1y, use daily data
             if price_series.empty:
@@ -2636,7 +2630,7 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
         fig = go.Figure()
         
         # Determine date format based on timeframe
-        # For 1w/1m (4-hourly), show date and time; for 1y (daily), show date only
+        # For 1w/1m (hourly), show date and time; for 1y (daily), show date only
         if timeframe in ("1w", "1m"):
             date_format = '%Y-%m-%d %H:%M'
             xaxis_title = 'Date & Time'
@@ -2877,7 +2871,7 @@ async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         # Date format for caption
         if timeframe_arg in ("1w", "1m"):
             date_format = '%Y-%m-%d %H:%M'
-            resolution_note = " (4-hourly data)"
+            resolution_note = " (hourly data)"
         else:
             date_format = '%Y-%m-%d'
             resolution_note = ""
