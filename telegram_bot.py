@@ -2479,12 +2479,65 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
-def _generate_chart_image(symbol: str, price_series: pd.Series, timeframe: str, days: int) -> Optional[Path]:
+def _fetch_hourly_price_data(coin_id: str, days: int) -> Optional[pd.Series]:
+    """Fetch hourly price data from CoinGecko API for chart generation.
+    
+    CoinGecko returns hourly data automatically when days <= 90.
+    
+    Args:
+        coin_id: CoinGecko coin ID
+        days: Number of days to fetch (7 for 1w, 30 for 1m)
+    
+    Returns:
+        Price Series with hourly data (datetime index) or None on error
+    """
+    url = f"{COINGECKO_API_BASE}/coins/{coin_id}/market_chart"
+    params = {
+        "vs_currency": VS_CURRENCY,
+        "days": days,
+        # No interval parameter - CoinGecko auto-returns hourly for days <= 90
+    }
+    
+    headers = {}
+    if COINGECKO_API_KEY:
+        headers["x-cg-pro-api-key"] = COINGECKO_API_KEY
+    
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            prices = data.get("prices", [])
+            
+            if not prices:
+                return None
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(prices, columns=["ts", "price"])
+            df["date"] = pd.to_datetime(df["ts"], unit="ms")
+            df = df.sort_values("date")
+            
+            # Set datetime index and return price series
+            price_series = df.set_index("date")["price"].sort_index()
+            return price_series
+        else:
+            logger.debug(f"Failed to fetch hourly data for {coin_id}: HTTP {r.status_code}")
+            return None
+    except Exception as e:
+        logger.debug(f"Error fetching hourly data for {coin_id}: {e}")
+        return None
+
+
+def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, timeframe: str, days: int) -> Optional[Path]:
     """Generate a chart image with dual Y-axes (price on left, indexed on right), both logarithmic.
+    
+    Uses best resolution available:
+    - 1w/1m: Fetches hourly data from CoinGecko, resamples to 4-hourly
+    - 1y: Uses daily data from DataManager
     
     Args:
         symbol: Coin symbol
-        price_series: Price series with date index
+        coin_id: CoinGecko coin ID (for fetching hourly data)
+        price_series: Daily price series with date index (fallback for 1y)
         timeframe: Label for timeframe ("1w", "1m", "1y")
         days: Number of days to show
     
@@ -2492,19 +2545,37 @@ def _generate_chart_image(symbol: str, price_series: pd.Series, timeframe: str, 
         Path to generated PNG file or None on error
     """
     try:
-        # Slice data for timeframe
-        if price_series.empty:
-            return None
+        # For 1w and 1m, fetch hourly data and resample to 4-hourly
+        if timeframe in ("1w", "1m"):
+            hourly_data = _fetch_hourly_price_data(coin_id, days)
+            if hourly_data is None or hourly_data.empty:
+                logger.warning(f"Could not fetch hourly data for {symbol}, falling back to daily")
+                # Fall back to daily data
+                hourly_data = price_series.sort_index().dropna()
+            else:
+                # Resample hourly data to 4-hourly intervals
+                # Use 'mean' to average prices within each 4-hour window
+                hourly_data = hourly_data.sort_index()
+                timeframe_data = hourly_data.resample('4H').mean().dropna()
+                
+                if timeframe_data.empty or len(timeframe_data) < 2:
+                    logger.warning(f"Not enough 4-hourly data for {symbol}, using hourly")
+                    timeframe_data = hourly_data
+        else:
+            # For 1y, use daily data
+            if price_series.empty:
+                return None
+            
+            price_series = price_series.sort_index().dropna()
+            if price_series.empty:
+                return None
+            
+            end_date = price_series.index[-1]
+            start_date = end_date - pd.Timedelta(days=days)
+            
+            # Filter to timeframe
+            timeframe_data = price_series[price_series.index >= start_date].dropna()
         
-        price_series = price_series.sort_index().dropna()
-        if price_series.empty:
-            return None
-        
-        end_date = price_series.index[-1]
-        start_date = end_date - pd.Timedelta(days=days)
-        
-        # Filter to timeframe
-        timeframe_data = price_series[price_series.index >= start_date].dropna()
         if timeframe_data.empty or len(timeframe_data) < 2:
             return None
         
@@ -2515,6 +2586,15 @@ def _generate_chart_image(symbol: str, price_series: pd.Series, timeframe: str, 
         # Create figure with dual Y-axes
         fig = go.Figure()
         
+        # Determine date format based on timeframe
+        # For 1w/1m (4-hourly), show date and time; for 1y (daily), show date only
+        if timeframe in ("1w", "1m"):
+            date_format = '%Y-%m-%d %H:%M'
+            xaxis_title = 'Date & Time'
+        else:
+            date_format = '%Y-%m-%d'
+            xaxis_title = 'Date'
+        
         # Add price trace (left Y-axis)
         fig.add_trace(go.Scatter(
             x=timeframe_data.index,
@@ -2523,8 +2603,8 @@ def _generate_chart_image(symbol: str, price_series: pd.Series, timeframe: str, 
             name=f'{symbol} Price',
             line=dict(width=2, color='#1f77b4'),
             yaxis='y',
-            hovertemplate='<b>%{fullData.name}</b><br>' +
-                         'Date: %{x|%Y-%m-%d}<br>' +
+            hovertemplate=f'<b>%{{fullData.name}}</b><br>' +
+                         f'Date: %{{x|{date_format}}}<br>' +
                          'Price: $%{y:,.2f}<extra></extra>'
         ))
         
@@ -2536,8 +2616,8 @@ def _generate_chart_image(symbol: str, price_series: pd.Series, timeframe: str, 
             name=f'{symbol} Index',
             line=dict(width=2, color='#ff7f0e', dash='dash'),
             yaxis='y2',
-            hovertemplate='<b>%{fullData.name}</b><br>' +
-                         'Date: %{x|%Y-%m-%d}<br>' +
+            hovertemplate=f'<b>%{{fullData.name}}</b><br>' +
+                         f'Date: %{{x|{date_format}}}<br>' +
                          'Index: %{y:.2f}<extra></extra>'
         ))
         
@@ -2556,7 +2636,7 @@ def _generate_chart_image(symbol: str, price_series: pd.Series, timeframe: str, 
                 font=dict(size=16)
             ),
             xaxis=dict(
-                title='Date',
+                title=xaxis_title,
                 type='date',
                 showgrid=True,
                 gridcolor='rgba(128,128,128,0.2)'
@@ -2687,7 +2767,16 @@ async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
             return
         
-        # Load price data
+        # Get coin_id for fetching hourly data
+        coin_info = _find_coin_info(symbol)
+        if not coin_info:
+            await safe_delete_loading_message(loading_msg)
+            await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
+            return
+        
+        coin_id = coin_info[0]
+        
+        # Load price data (used as fallback for 1y or if hourly fetch fails)
         from src.app.callbacks import _load_price_data
         
         prices_dict = _load_price_data()
@@ -2709,7 +2798,8 @@ async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         chart_path = await loop.run_in_executor(
             None, 
             _generate_chart_image, 
-            symbol, 
+            symbol,
+            coin_id,
             price_series, 
             timeframe_arg, 
             days
@@ -2735,6 +2825,14 @@ async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         start_date = end_date - pd.Timedelta(days=days)
         timeframe_data = price_series[price_series.index >= start_date].dropna()
         
+        # Date format for caption
+        if timeframe_arg in ("1w", "1m"):
+            date_format = '%Y-%m-%d %H:%M'
+            resolution_note = " (4-hourly data)"
+        else:
+            date_format = '%Y-%m-%d'
+            resolution_note = ""
+        
         if not timeframe_data.empty:
             first_price = timeframe_data.iloc[0]
             first_date = timeframe_data.index[0]
@@ -2742,8 +2840,8 @@ async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             low_price = timeframe_data.min()
             
             caption = (
-                f"📈 *{symbol} Price & Index - Last {timeframe_label}*\n\n"
-                f"📅 {first_date.strftime('%Y-%m-%d')} → {latest_date.strftime('%Y-%m-%d')}\n\n"
+                f"📈 *{symbol} Price & Index - Last {timeframe_label}{resolution_note}*\n\n"
+                f"📅 {first_date.strftime(date_format)} → {latest_date.strftime(date_format)}\n\n"
                 f"💵 Current Price: ${latest_price:,.2f}\n"
                 f"📊 High: ${high_price:,.2f}  |  Low: ${low_price:,.2f}\n\n"
                 f"📈 Left axis: Price (USD, log scale)\n"
