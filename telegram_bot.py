@@ -1013,6 +1013,9 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("❌ Could not identify user.")
         return
     
+    # Normalize user_id to int for consistent comparison
+    user_id_int = int(user_id) if user_id else None
+    
     stopped_any = False
     tracked_pid = None
     
@@ -1020,11 +1023,14 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user_owns_dashboard = False
     dashboard_running = _check_dashboard_running()
     
+    # Normalize all keys in dashboard_owners to int for comparison
+    normalized_owners = {int(k): v for k, v in dashboard_owners.items()}
+    
     # User owns dashboard if:
     # 1. Dashboard is running on port AND
     # 2. User_id is in dashboard_owners (even if process object is stale)
-    if dashboard_running and user_id in dashboard_owners:
-        owner_info = dashboard_owners[user_id]
+    if dashboard_running and user_id_int in normalized_owners:
+        owner_info = normalized_owners[user_id_int]
         dashboard_process = owner_info.get("process")
         if dashboard_process:
             # Process object exists, check if it's still valid
@@ -1046,7 +1052,7 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         running_owner_id = None
         
         # First try to find owner with valid process
-        for uid, info in dashboard_owners.items():
+        for uid, info in normalized_owners.items():
             process = info.get("process")
             if process and process.poll() is None:
                 running_owner = info
@@ -1054,22 +1060,22 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 break
         
         # If no valid process found but dashboard is running, check all owners
-        if not running_owner and dashboard_owners:
+        if not running_owner and normalized_owners:
             # If only one owner exists and dashboard is running, they likely own it
-            if len(dashboard_owners) == 1:
-                uid = list(dashboard_owners.keys())[0]
-                running_owner = dashboard_owners[uid]
+            if len(normalized_owners) == 1:
+                uid = list(normalized_owners.keys())[0]
+                running_owner = normalized_owners[uid]
                 running_owner_id = uid
             else:
                 # Multiple owners - use the first one as fallback
-                uid = list(dashboard_owners.keys())[0]
-                running_owner = dashboard_owners[uid]
+                uid = list(normalized_owners.keys())[0]
+                running_owner = normalized_owners[uid]
                 running_owner_id = uid
         
         if running_owner:
             owner_username = running_owner.get("username", "another user")
             # Check if it's actually the current user (might be stale process check)
-            if running_owner_id == user_id:
+            if running_owner_id == user_id_int:
                 # User actually owns it, proceed with stop
                 logger.debug(f"User {user_id} owns dashboard (matched by ID in stop)")
                 user_owns_dashboard = True
@@ -1101,8 +1107,10 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             logger.error(f"Error stopping tracked process: {e}")
         finally:
             dashboard_process = None
-            # Remove from owners dict
-            if user_id in dashboard_owners:
+            # Remove from owners dict (check both normalized and original key)
+            if user_id_int in dashboard_owners:
+                del dashboard_owners[user_id_int]
+            elif user_id in dashboard_owners:
                 del dashboard_owners[user_id]
     
     # Also check for and stop manually started main.py processes
