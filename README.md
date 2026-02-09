@@ -65,6 +65,13 @@ Control your dashboard remotely via Telegram! The bot allows you to:
 3. Run: `python telegram_bot.py`
 4. Send `/start` to your bot in Telegram
 
+**Key Features:**
+- **Dashboard Control**: Start/stop dashboard remotely with per-user ownership tracking
+- **Instant Price Queries**: Get real-time prices without dashboard running (`/price BTC`)
+- **Timeframe Summaries**: 1d/1w/1m/1y price and market cap summaries (`/summary BTC 1m`)
+- **Chart Images**: Generate dual-axis logarithmic charts (price + indexed) for 1w/1m/1y (`/chart BTC 1w`)
+- **Coin Information**: Detailed coin data including supply, indexed price, all-time high/low (`/info BTC`)
+
 **Full Documentation:** See [TELEGRAM_BOT.md](TELEGRAM_BOT.md) for complete setup and usage guide.
 
 ### Basic Usage (Free API) - Full Python Application

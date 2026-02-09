@@ -158,6 +158,7 @@ Or manually via BotFather:
 | `/latest` | **Live prices for all coins** | `/latest` |
 | `/info <SYMBOL>` | Detailed coin info using dashboard history | `/info DOGE` |
 | `/summary <SYMBOL> [1d\|1w\|1m\|1y]` | 1d/1w/1m/1y price & market cap summary | `/summary BTC`, `/summary ETH 1m` |
+| `/chart <SYMBOL> [1w\|1m\|1y]` | Price & index chart image (dual Y-axis, logarithmic) | `/chart BTC`, `/chart ETH 1w`, `/chart DOGE 1m` |
 
 ### Navigation
 
@@ -217,6 +218,46 @@ Bot: 📊 BTC Summary
 
      Last updated: 2026-02-09 12:34:56
 ```
+
+### Price & Index Chart Image
+
+Generate and receive chart images showing price and indexed price with dual Y-axes (both logarithmic):
+
+```
+User: /chart BTC 1w
+Bot: [Sends chart image]
+
+📈 BTC Price & Index - Last 1 Week (hourly data)
+
+📅 2026-02-02 12:00 → 2026-02-09 12:00
+
+💵 Current Price: $70,000.00
+📊 High: $72,500.00  |  Low: $68,200.00
+
+📈 Left axis: Price (USD, log scale)
+📊 Right axis: Index (100 = start, log scale)
+
+Last updated: 2026-02-09 12:34:56
+```
+
+**Features:**
+- **Timeframes**: 1w (1 week), 1m (1 month), 1y (1 year)
+- **Data Resolution**:
+  - 1w/1m: Hourly data points (fetched from CoinGecko API)
+  - 1y: Daily data points (from cached dashboard data)
+- **Dual Y-Axes**: 
+  - Left: Price in USD (logarithmic scale)
+  - Right: Indexed price (normalized to 100 at start, logarithmic scale)
+- **Smart Formatting**: Automatically adjusts decimal precision for low-priced coins
+- **Interactive Buttons**: Switch between 1w/1m/1y timeframes directly from the chart
+
+**Examples:**
+- `/chart BTC` - 1 year chart (default)
+- `/chart BTC 1w` - 1 week chart with hourly data
+- `/chart ETH 1m` - 1 month chart with hourly data
+- `/chart DOGE 1y` - 1 year chart with daily data
+
+**Note**: Requires dashboard to be running for historical data access. Chart images are temporarily stored and automatically cleaned up.
 
 ### Checking Status
 

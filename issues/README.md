@@ -25,7 +25,7 @@ This directory contains issue templates for problems found during code review.
 13. **013-correlation-numerical.md** - Feature: Correlation between 2 coins (numerical)
 14. **014-correlation-chart.md** - Feature: Correlation between 2 coins (with chart image)
 15. **015-instant-price.md** - Feature: Instant price of coins ✅ Fixed
-16. **016-1year-chart-image.md** - Feature: 1 year chart image of coins
+16. **016-1year-chart-image.md** - Feature: 1 year chart image of coins ✅ Fixed
 17. **017-timeframe-summary.md** - Feature: 1d, 1w, 1m and 1y summary for coins ✅ Fixed
 18. **018-telegram-command-bar.md** - Enhancement: Show command bar in Telegram using "/" button (High priority)
 19. **019-enhance-info-command.md** - Enhancement: Show full coin details in /info command (High priority) ✅ Fixed
