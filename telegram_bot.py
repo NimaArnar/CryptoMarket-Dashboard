@@ -2600,9 +2600,9 @@ def _generate_chart_image(symbol: str, price_series: pd.Series, timeframe: str, 
         chart_filename = f"{symbol}_{timeframe}_{timestamp}.png"
         chart_path = charts_dir / chart_filename
         
-        # Export to PNG using kaleido
+        # Export to PNG (kaleido is default engine)
         try:
-            fig.write_image(str(chart_path), engine='kaleido', width=1200, height=600, scale=2)
+            fig.write_image(str(chart_path), width=1200, height=600, scale=2)
             logger.debug(f"Chart saved to {chart_path}")
             return chart_path
         except Exception as e:
@@ -2610,6 +2610,7 @@ def _generate_chart_image(symbol: str, price_series: pd.Series, timeframe: str, 
             # Check if kaleido is installed
             try:
                 import kaleido
+                logger.debug("kaleido is installed but export failed")
             except ImportError:
                 logger.error("kaleido not installed. Install with: pip install kaleido")
             return None
