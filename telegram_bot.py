@@ -362,7 +362,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "*/price <SYMBOL>* - Instant price (e.g., /price BTC)\n"
             "*/coins* - List all available coins\n"
             "*/latest* - Live prices for all coins\n"
-            "*/info <SYMBOL>* - Detailed coin information\n\n"
+            "*/info <SYMBOL>* - Detailed coin information\n"
+            "*/summary <SYMBOL> [1d|1w|1m|1y]* - Timeframe summary\n\n"
             f"🌐 Dashboard: http://127.0.0.1:{DASH_PORT}/"
         )
         
@@ -571,7 +572,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "*/price <SYMBOL>* - Instant price (e.g., /price BTC)\n"
         "*/coins* - List all available coins\n"
         "*/latest* - Live prices for all coins\n"
-        "*/info <SYMBOL>* - Detailed coin information\n\n"
+        "*/info <SYMBOL>* - Detailed coin information\n"
+        "*/summary <SYMBOL> [1d|1w|1m|1y]* - Timeframe summary\n\n"
         f"🌐 Dashboard: http://127.0.0.1:{DASH_PORT}/"
     )
     await update.message.reply_text(
@@ -2223,6 +2225,216 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
+def _compute_timeframe_change(series: Optional[pd.Series], days: int) -> Optional[Dict]:
+    """Compute percentage and absolute change over a timeframe.
+
+    Uses the last value in the series as 'current' and compares it to the
+    value from approximately `days` ago (or earliest available if not enough data).
+    """
+    if series is None or series.empty:
+        return None
+
+    # Ensure series is sorted by index
+    series = series.sort_index()
+
+    end_value = series.iloc[-1]
+    end_date = series.index[-1]
+
+    if pd.isna(end_value):
+        return None
+
+    target_date = end_date - pd.Timedelta(days=days)
+
+    # Use the last value at or before target_date as the starting point
+    subset = series[series.index <= end_date]
+    if subset.empty:
+        return None
+
+    start_candidates = subset[subset.index <= target_date]
+    if not start_candidates.empty:
+        start_value = start_candidates.iloc[-1]
+        start_date = start_candidates.index[-1]
+    else:
+        # Not enough history; fall back to earliest available value
+        start_value = subset.iloc[0]
+        start_date = subset.index[0]
+
+    if pd.isna(start_value) or start_value == 0:
+        return None
+
+    abs_change = float(end_value - start_value)
+    pct_change = (abs_change / float(start_value)) * 100.0
+
+    # High/low within the period (from start_date to end_date)
+    period_series = series[(series.index >= start_date) & (series.index <= end_date)].dropna()
+    if period_series.empty:
+        high = low = float(end_value)
+    else:
+        high = float(period_series.max())
+        low = float(period_series.min())
+
+    return {
+        "start_value": float(start_value),
+        "end_value": float(end_value),
+        "abs_change": abs_change,
+        "pct_change": pct_change,
+        "start_date": start_date,
+        "end_date": end_date,
+        "high": high,
+        "low": low,
+    }
+
+
+@rate_limit(max_calls=10, period=60)
+async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /summary command - 1d, 1w, 1m, 1y summary for a coin."""
+    # Parse args
+    if not context.args:
+        await update.message.reply_text("❌ Please specify a coin symbol. Example: /summary BTC")
+        return
+
+    symbol = context.args[0].upper()
+    timeframe_arg = context.args[1].lower() if len(context.args) > 1 else "all"
+
+    # Track user action
+    log_user_action(update, "command", f"/summary {symbol} {timeframe_arg}")
+
+    # Validate symbol format
+    if not validate_symbol(symbol):
+        await update.message.reply_text(
+            "❌ Invalid symbol format.\n\n"
+            "💡 Symbol must be 1-10 alphanumeric characters.\n"
+            "Example: BTC, ETH, DOGE"
+        )
+        return
+
+    # Validate timeframe
+    valid_timeframes = {"1d": 1, "1w": 7, "1m": 30, "1y": 365}
+    if timeframe_arg != "all" and timeframe_arg not in valid_timeframes:
+        await update.message.reply_text(
+            "❌ Invalid timeframe.\n\n"
+            "Supported timeframes: 1d, 1w, 1m, 1y, or omit to show all.\n"
+            "Examples:\n"
+            "/summary BTC\n"
+            "/summary BTC 1w"
+        )
+        return
+
+    # Require dashboard data (DataManager)
+    if not _check_dashboard_running():
+        await update.message.reply_text(
+            "⚠️ *Dashboard is offline*\n\n"
+            "💡 The dashboard needs to be running to access historical data.\n"
+            "Use /run to start the dashboard first."
+        )
+        return
+
+    loading_msg = None
+    try:
+        loading_msg = await create_loading_message(update)
+        loop = asyncio.get_event_loop()
+
+        # Load data manager in executor (non-blocking)
+        dm = await loop.run_in_executor(None, _load_data_manager)
+
+        if symbol not in dm.series:
+            await safe_delete_loading_message(loading_msg)
+            await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
+            return
+
+        mc_series = dm.series[symbol]
+        latest_mc = mc_series.iloc[-1]
+        latest_date = mc_series.index[-1]
+
+        # Load price data
+        from src.app.callbacks import _load_price_data
+
+        prices_dict = _load_price_data()
+        price_series = prices_dict.get(symbol)
+        if price_series is not None:
+            price_series = price_series.dropna().sort_index()
+
+        # Determine which timeframes to compute
+        if timeframe_arg == "all":
+            timeframes = valid_timeframes
+        else:
+            timeframes = {timeframe_arg: valid_timeframes[timeframe_arg]}
+
+        lines = [f"📊 *{symbol} Summary*"]
+        lines.append("")
+        lines.append(f"Latest Price/Market Cap as of {latest_date.strftime('%Y-%m-%d')}:")
+
+        # Latest price if available
+        latest_price = None
+        if price_series is not None and not price_series.empty:
+            latest_price = float(price_series.iloc[-1])
+            lines.append(f"Price: ${latest_price:,.2f}")
+        lines.append(f"Market Cap: ${latest_mc:,.0f}")
+        lines.append("")
+
+        # Per-timeframe stats
+        for tf_label, days in timeframes.items():
+            price_change = _compute_timeframe_change(price_series, days) if price_series is not None else None
+            mc_change = _compute_timeframe_change(mc_series, days)
+
+            # Skip timeframe if we have neither price nor MC change
+            if price_change is None and mc_change is None:
+                continue
+
+            pretty_label = {
+                "1d": "1 Day",
+                "1w": "1 Week",
+                "1m": "1 Month",
+                "1y": "1 Year",
+            }.get(tf_label, tf_label)
+
+            lines.append(f"⏱ *{pretty_label}*")
+
+            if price_change is not None:
+                pct = price_change["pct_change"]
+                abs_ch = price_change["abs_change"]
+                emoji = "📈" if pct >= 0 else "📉"
+                lines.append(
+                    f"{emoji} Price: {pct:+.2f}%  "
+                    f"(${abs_ch:+,.2f}, {price_change['start_date'].strftime('%Y-%m-%d')} → "
+                    f"{price_change['end_date'].strftime('%Y-%m-%d')})"
+                )
+
+                # Only show high/low for 1y by default (to avoid clutter)
+                if tf_label == "1y":
+                    lines.append(
+                        f"   Low (1y): ${price_change['low']:,.2f}  |  "
+                        f"High (1y): ${price_change['high']:,.2f}"
+                    )
+
+            if mc_change is not None:
+                pct = mc_change["pct_change"]
+                abs_ch = mc_change["abs_change"]
+                emoji = "📈" if pct >= 0 else "📉"
+                lines.append(
+                    f"{emoji} Market Cap: {pct:+.2f}%  "
+                    f"(${abs_ch:+,.0f}, {mc_change['start_date'].strftime('%Y-%m-%d')} → "
+                    f"{mc_change['end_date'].strftime('%Y-%m-%d')})"
+                )
+
+            lines.append("")
+
+        # If nothing was added (very short history)
+        if len(lines) <= 4:
+            lines.append("⚠️ Not enough historical data to compute summaries for this coin.")
+
+        # Add timestamp at the end
+        lines.append(f"Last updated: {format_timestamp(latest_date)}")
+
+        await safe_delete_loading_message(loading_msg)
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    except Exception as e:
+        logger.error(f"Error getting summary for {symbol}: {e}")
+        await safe_delete_loading_message(loading_msg)
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle unknown commands."""
     # Track user action
@@ -2363,6 +2575,7 @@ async def main_async() -> None:
             BotCommand("coins", "List all available coins"),
             BotCommand("latest", "Live prices for all coins"),
             BotCommand("info", "Get detailed information for a coin (e.g., /info BTC)"),
+            BotCommand("summary", "1d/1w/1m/1y price & market cap summary"),
         ]
         await application.bot.set_my_commands(commands)
         logger.info("Bot commands registered successfully")
@@ -2400,6 +2613,7 @@ async def main_async() -> None:
     application.add_handler(CommandHandler("coins", coins_command))
     application.add_handler(CommandHandler("latest", latest_command))
     application.add_handler(CommandHandler("info", info_command))
+    application.add_handler(CommandHandler("summary", summary_command))
     
     # Unknown command handler (must be last to catch unhandled commands)
     # This catches any command that starts with / but isn't handled above
