@@ -358,10 +358,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "*/stop* - Stop the dashboard server\n"
             "*/restart* - Restart the dashboard server\n"
             "*/status* - Check if dashboard is running\n\n"
-            "💰 *Data Queries:*\n"
-            "*/price <SYMBOL>* - Get latest price (e.g., /price BTC)\n"
+            "💰 *Data Queries (live, no dashboard needed):*\n"
+            "*/price <SYMBOL>* - Instant price (e.g., /price BTC)\n"
             "*/coins* - List all available coins\n"
-            "*/latest* - Latest prices for all coins\n"
+            "*/latest* - Live prices for all coins\n"
             "*/info <SYMBOL>* - Detailed coin information\n\n"
             f"🌐 Dashboard: http://127.0.0.1:{DASH_PORT}/"
         )
@@ -567,10 +567,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "*/stop* - Stop the dashboard server\n"
         "*/restart* - Restart the dashboard server\n"
         "*/status* - Check if dashboard is running\n\n"
-        "💰 *Data Queries:*\n"
-        "*/price <SYMBOL>* - Get latest price (e.g., /price BTC)\n"
+        "💰 *Data Queries (live, no dashboard needed):*\n"
+        "*/price <SYMBOL>* - Instant price (e.g., /price BTC)\n"
         "*/coins* - List all available coins\n"
-        "*/latest* - Latest prices for all coins\n"
+        "*/latest* - Live prices for all coins\n"
         "*/info <SYMBOL>* - Detailed coin information\n\n"
         f"🌐 Dashboard: http://127.0.0.1:{DASH_PORT}/"
     )
@@ -1509,6 +1509,82 @@ async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
+# In-memory cache for instant prices (coin_id -> {data, timestamp})
+_instant_price_cache: Dict[str, dict] = {}
+INSTANT_PRICE_CACHE_TTL = 60  # seconds
+
+
+def _fetch_instant_price(coin_id: str, symbol: str) -> Optional[Dict]:
+    """Fetch instant/real-time price from CoinGecko /simple/price endpoint.
+    
+    Returns dict with price, market_cap, change_24h, last_updated or None on failure.
+    Results are cached for INSTANT_PRICE_CACHE_TTL seconds.
+    """
+    global _instant_price_cache
+    
+    # Check cache first
+    now = time.time()
+    cache_key = coin_id
+    if cache_key in _instant_price_cache:
+        cached = _instant_price_cache[cache_key]
+        if now - cached["fetched_at"] < INSTANT_PRICE_CACHE_TTL:
+            logger.debug(f"Instant price cache hit for {symbol}")
+            return cached["data"]
+    
+    url = f"{COINGECKO_API_BASE}/simple/price"
+    params = {
+        "ids": coin_id,
+        "vs_currencies": VS_CURRENCY,
+        "include_market_cap": "true",
+        "include_24hr_change": "true",
+        "include_24hr_vol": "true",
+        "include_last_updated_at": "true",
+    }
+    
+    headers = {}
+    if COINGECKO_API_KEY:
+        headers["x-cg-pro-api-key"] = COINGECKO_API_KEY
+    
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            coin_data = data.get(coin_id, {})
+            if not coin_data:
+                return None
+            
+            result = {
+                "price": coin_data.get(f"{VS_CURRENCY}"),
+                "market_cap": coin_data.get(f"{VS_CURRENCY}_market_cap"),
+                "change_24h": coin_data.get(f"{VS_CURRENCY}_24h_change"),
+                "volume_24h": coin_data.get(f"{VS_CURRENCY}_24h_vol"),
+                "last_updated": coin_data.get("last_updated_at"),
+            }
+            
+            # Cache the result
+            _instant_price_cache[cache_key] = {
+                "data": result,
+                "fetched_at": now,
+            }
+            
+            return result
+        elif r.status_code == 429:
+            logger.warning("CoinGecko rate limit hit for instant price")
+            # Return cached data even if expired
+            if cache_key in _instant_price_cache:
+                return _instant_price_cache[cache_key]["data"]
+            return None
+        else:
+            logger.debug(f"Failed to fetch instant price for {coin_id}: HTTP {r.status_code}")
+            return None
+    except Exception as e:
+        logger.debug(f"Error fetching instant price for {coin_id}: {e}")
+        # Return cached data even if expired on error
+        if cache_key in _instant_price_cache:
+            return _instant_price_cache[cache_key]["data"]
+        return None
+
+
 def _fetch_coin_details(coin_id: str) -> Optional[Dict]:
     """Fetch coin details (circulating supply, total supply) from CoinGecko API."""
     
@@ -1672,7 +1748,11 @@ def _check_dashboard_running() -> bool:
 
 @rate_limit(max_calls=15, period=60)
 async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /price command - get latest price for a coin."""
+    """Handle /price command - get instant/real-time price for a coin.
+    
+    Fetches live data directly from CoinGecko API. No dashboard required.
+    Falls back to cached historical data if API call fails and dashboard is running.
+    """
     # Track user action
     symbol = context.args[0].upper() if context.args and len(context.args) > 0 else "none"
     log_user_action(update, "command", f"/price {symbol}")
@@ -1692,97 +1772,224 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
     
-    # Check if dashboard is running
-    if not _check_dashboard_running():
-        await update.message.reply_text(
-            "⚠️ *Dashboard is offline*\n\n"
-            "💡 The dashboard needs to be running to access data.\n"
-            "Use /run to start the dashboard first."
-        )
+    # Find coin_id for this symbol
+    coin_info = _find_coin_info(symbol)
+    if not coin_info:
+        await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
         return
-    loading_msg = None
+    
+    coin_id = coin_info[0]
     
     try:
-        # Load only this coin's data (much faster than loading all coins)
+        # Fetch instant price from CoinGecko API (no dashboard needed)
         loop = asyncio.get_event_loop()
-        mc_series, price_series, meta = await loop.run_in_executor(None, _load_single_coin_data, symbol)
+        instant_data = await loop.run_in_executor(None, _fetch_instant_price, coin_id, symbol)
         
-        if mc_series is None:
-            await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
-            return
-        
-        # Get latest market cap
-        latest_mc = mc_series.iloc[-1]
-        latest_date = mc_series.index[-1]
-        
-        latest_price = None
-        change_24h = None
-        change_emoji = ""
-        
-        if price_series is not None:
-            price_series = price_series.dropna()
-            if not price_series.empty:
-                latest_price = price_series.iloc[-1]
-                # Calculate 24h change if possible
-                if len(price_series) > 1:
-                    prev_price = price_series.iloc[-2]
-                    change_24h = ((latest_price - prev_price) / prev_price) * 100
-                    change_emoji = "📈" if change_24h >= 0 else "📉"
-        
-        # Format timestamp
-        timestamp_str = format_timestamp(latest_date)
-        
-        # If no price data, show market cap only
-        if latest_price is None:
-            price_text = (
-                f"💰 *{symbol} Price*\n\n"
-                f"Market Cap: ${latest_mc:,.0f}\n"
-                f"Date: {latest_date.strftime('%Y-%m-%d')}\n"
-                f"Price data not available\n"
-                f"Last updated: {timestamp_str}\n"
-            )
-        else:
-            price_text = (
-                f"💰 *{symbol} Price*\n\n"
-                f"Price: ${latest_price:,.2f}\n"
-                f"Market Cap: ${latest_mc:,.0f}\n"
-                f"Date: {latest_date.strftime('%Y-%m-%d')}\n"
-            )
+        if instant_data and instant_data.get("price") is not None:
+            # Build response from live data
+            price = instant_data["price"]
+            market_cap = instant_data.get("market_cap")
+            change_24h = instant_data.get("change_24h")
+            volume_24h = instant_data.get("volume_24h")
+            last_updated_ts = instant_data.get("last_updated")
+            
+            price_text = f"💰 *{symbol} Price*\n\n"
+            price_text += f"Price: ${price:,.2f}\n"
+            
+            if market_cap:
+                if market_cap >= 1e12:
+                    mc_str = f"${market_cap / 1e12:.2f}T"
+                elif market_cap >= 1e9:
+                    mc_str = f"${market_cap / 1e9:.2f}B"
+                elif market_cap >= 1e6:
+                    mc_str = f"${market_cap / 1e6:.2f}M"
+                else:
+                    mc_str = f"${market_cap:,.0f}"
+                price_text += f"Market Cap: {mc_str}\n"
+            
+            if volume_24h:
+                if volume_24h >= 1e9:
+                    vol_str = f"${volume_24h / 1e9:.2f}B"
+                elif volume_24h >= 1e6:
+                    vol_str = f"${volume_24h / 1e6:.2f}M"
+                else:
+                    vol_str = f"${volume_24h:,.0f}"
+                price_text += f"24h Volume: {vol_str}\n"
             
             if change_24h is not None:
+                change_emoji = "📈" if change_24h >= 0 else "📉"
                 price_text += f"{change_emoji} 24h Change: {change_24h:+.2f}%\n"
             
-            price_text += f"Last updated: {timestamp_str}\n"
+            # Format last updated timestamp
+            if last_updated_ts:
+                updated_dt = datetime.utcfromtimestamp(last_updated_ts)
+                price_text += f"\nLast updated: {updated_dt.strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
+            
+            await update.message.reply_text(price_text, parse_mode="Markdown")
+            return
         
-        # Delete loading message and send result
-        await safe_delete_loading_message(loading_msg)
-        await update.message.reply_text(price_text, parse_mode="Markdown")
+        # Fallback: try cached historical data if dashboard is running
+        if _check_dashboard_running():
+            mc_series, price_series, meta = await loop.run_in_executor(None, _load_single_coin_data, symbol)
+            
+            if mc_series is not None:
+                latest_mc = mc_series.iloc[-1]
+                latest_date = mc_series.index[-1]
+                latest_price = None
+                change_24h = None
+                
+                if price_series is not None:
+                    price_series = price_series.dropna()
+                    if not price_series.empty:
+                        latest_price = price_series.iloc[-1]
+                        if len(price_series) > 1:
+                            prev_price = price_series.iloc[-2]
+                            change_24h = ((latest_price - prev_price) / prev_price) * 100
+                
+                timestamp_str = format_timestamp(latest_date)
+                
+                price_text = f"💰 *{symbol} Price* _(cached)_\n\n"
+                if latest_price is not None:
+                    price_text += f"Price: ${latest_price:,.2f}\n"
+                price_text += f"Market Cap: ${latest_mc:,.0f}\n"
+                if change_24h is not None:
+                    change_emoji = "📈" if change_24h >= 0 else "📉"
+                    price_text += f"{change_emoji} 24h Change: {change_24h:+.2f}%\n"
+                price_text += f"\nLast updated: {timestamp_str}\n"
+                
+                await update.message.reply_text(price_text, parse_mode="Markdown")
+                return
+        
+        # Both instant and cached failed
+        await update.message.reply_text(
+            f"❌ Could not fetch price for {symbol}.\n\n"
+            "💡 CoinGecko API may be temporarily unavailable.\n"
+            "Please try again in a moment."
+        )
         
     except Exception as e:
         logger.error(f"Error getting price for {symbol}: {e}")
-        await safe_delete_loading_message(loading_msg)
         await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
+def _fetch_all_instant_prices() -> Optional[Dict]:
+    """Fetch instant prices for all coins from CoinGecko /simple/price endpoint.
+    
+    Returns dict of {symbol: {price, market_cap, change_24h}} or None.
+    """
+    from src.constants import COINS
+    
+    coin_ids = [cid for cid, _, _, _ in COINS]
+    ids_str = ",".join(coin_ids)
+    
+    url = f"{COINGECKO_API_BASE}/simple/price"
+    params = {
+        "ids": ids_str,
+        "vs_currencies": VS_CURRENCY,
+        "include_market_cap": "true",
+        "include_24hr_change": "true",
+        "include_last_updated_at": "true",
+    }
+    
+    headers = {}
+    if COINGECKO_API_KEY:
+        headers["x-cg-pro-api-key"] = COINGECKO_API_KEY
+    
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            result = {}
+            for cid, sym, _, _ in COINS:
+                coin_data = data.get(cid, {})
+                if coin_data and coin_data.get(VS_CURRENCY) is not None:
+                    result[sym] = {
+                        "price": coin_data.get(VS_CURRENCY),
+                        "market_cap": coin_data.get(f"{VS_CURRENCY}_market_cap"),
+                        "change_24h": coin_data.get(f"{VS_CURRENCY}_24h_change"),
+                        "last_updated": coin_data.get("last_updated_at"),
+                    }
+            return result
+        else:
+            logger.debug(f"Failed to fetch all instant prices: HTTP {r.status_code}")
+            return None
+    except Exception as e:
+        logger.debug(f"Error fetching all instant prices: {e}")
+        return None
 
 
 @rate_limit(max_calls=10, period=60)
 async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /latest command - get latest prices for all coins."""
+    """Handle /latest command - get latest prices for all coins.
+    
+    Uses instant CoinGecko data when available, falls back to cached data
+    if dashboard is running.
+    """
     # Track user action
     log_user_action(update, "command", "/latest")
-    
-    # Check if dashboard is running
-    if not _check_dashboard_running():
-        await update.message.reply_text(
-            "⚠️ *Dashboard is offline*\n\n"
-            "💡 The dashboard needs to be running to access data.\n"
-            "Use /run to start the dashboard first."
-        )
-        return
     
     loading_msg = None
     try:
         loading_msg = await create_loading_message(update)
         loop = asyncio.get_event_loop()
+        
+        # Try instant prices first (no dashboard needed)
+        instant_prices = await loop.run_in_executor(None, _fetch_all_instant_prices)
+        
+        if instant_prices:
+            # Sort by market cap descending
+            sorted_coins = sorted(
+                instant_prices.items(),
+                key=lambda x: x[1].get("market_cap") or 0,
+                reverse=True
+            )
+            
+            latest_text = "📊 *Latest Prices*\n\n"
+            
+            for sym, data in sorted_coins:
+                price = data["price"]
+                change = data.get("change_24h")
+                
+                line = f"{sym}: ${price:,.2f}"
+                if change is not None:
+                    emoji = "📈" if change >= 0 else "📉"
+                    line += f"  {emoji} {change:+.1f}%"
+                latest_text += line + "\n"
+            
+            # Timestamp from first coin's last_updated
+            first_ts = next(iter(instant_prices.values()), {}).get("last_updated")
+            if first_ts:
+                updated_dt = datetime.utcfromtimestamp(first_ts)
+                latest_text += f"\nLast updated: {updated_dt.strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
+            
+            # Send (split if needed)
+            await safe_delete_loading_message(loading_msg)
+            if len(latest_text) > BOT_MAX_MESSAGE_LENGTH:
+                # Split into chunks
+                lines = latest_text.split("\n")
+                header = lines[0] + "\n\n"
+                current_msg = header
+                for line in lines[2:]:
+                    if len(current_msg) + len(line) + 1 > BOT_MAX_MESSAGE_LENGTH:
+                        await update.message.reply_text(current_msg, parse_mode="Markdown")
+                        current_msg = line + "\n"
+                    else:
+                        current_msg += line + "\n"
+                if current_msg.strip():
+                    await update.message.reply_text(current_msg, parse_mode="Markdown")
+            else:
+                await update.message.reply_text(latest_text, parse_mode="Markdown")
+            return
+        
+        # Fallback: cached data from dashboard
+        if not _check_dashboard_running():
+            await safe_delete_loading_message(loading_msg)
+            await update.message.reply_text(
+                "❌ Could not fetch live prices.\n\n"
+                "💡 CoinGecko API may be temporarily unavailable.\n"
+                "Please try again in a moment."
+            )
+            return
         
         # Start progress update task
         progress_task = await update_loading_progress(loading_msg)
@@ -1794,14 +2001,15 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         progress_task.cancel()
         
         if dm.df_raw is None or dm.df_raw.empty:
+            await safe_delete_loading_message(loading_msg)
             await update.message.reply_text("❌ No data available. Try running the dashboard first.")
             return
         
-        latest_text = f"📊 *Latest Prices*\n"
+        latest_text = f"📊 *Latest Prices* _(cached)_\n"
         latest_date = dm.df_raw.index[-1]
         latest_text += f"Date: {latest_date.strftime('%Y-%m-%d')}\n\n"
         
-        # Show ALL coins (not just top 10)
+        # Show ALL coins
         from src.app.callbacks import _load_price_data
         prices_dict = _load_price_data()
         
@@ -1813,61 +2021,30 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 if not price_series.empty:
                     price = price_series.iloc[-1]
                     latest_text += f"{sym}: ${price:,.2f}\n"
-                else:
-                    # Fallback to market cap if no price
-                    if sym in dm.series:
-                        mc = dm.series[sym].iloc[-1]
-                        latest_text += f"{sym}: MC ${mc:,.0f}\n"
+                elif sym in dm.series:
+                    mc = dm.series[sym].iloc[-1]
+                    latest_text += f"{sym}: MC ${mc:,.0f}\n"
             elif sym in dm.series:
-                # Fallback to market cap if no price data
                 mc = dm.series[sym].iloc[-1]
                 latest_text += f"{sym}: MC ${mc:,.0f}\n"
         
-        # Add timestamp at the end
         latest_text += f"\nLast updated: {format_timestamp(latest_date)}\n"
         
-        # Check message length and split if needed
+        await safe_delete_loading_message(loading_msg)
+        
         if len(latest_text) > BOT_MAX_MESSAGE_LENGTH:
-            # Split into multiple messages
-            messages = []
-            latest_date = dm.df_raw.index[-1]
-            header = f"📊 *Latest Prices*\nDate: {latest_date.strftime('%Y-%m-%d')}\n\n"
+            lines = latest_text.split("\n")
+            header = lines[0] + "\n" + lines[1] + "\n\n"
             current_msg = header
-            
-            for sym in symbols_to_show:
-                line = ""
-                if sym in prices_dict:
-                    price_series = prices_dict[sym].dropna()
-                    if not price_series.empty:
-                        price = price_series.iloc[-1]
-                        line = f"{sym}: ${price:,.2f}\n"
-                    elif sym in dm.series:
-                        mc = dm.series[sym].iloc[-1]
-                        line = f"{sym}: MC ${mc:,.0f}\n"
-                elif sym in dm.series:
-                    mc = dm.series[sym].iloc[-1]
-                    line = f"{sym}: MC ${mc:,.0f}\n"
-                
-                if len(current_msg) + len(line) > BOT_MAX_MESSAGE_LENGTH:
-                    messages.append(current_msg)
-                    current_msg = line
+            for line in lines[3:]:
+                if len(current_msg) + len(line) + 1 > BOT_MAX_MESSAGE_LENGTH:
+                    await update.message.reply_text(current_msg, parse_mode="Markdown")
+                    current_msg = line + "\n"
                 else:
-                    current_msg += line
-            
-            if current_msg:
-                messages.append(current_msg)
-            
-            if loading_msg:
-                try:
-                    await loading_msg.delete()
-                except Exception:
-                    pass
-            
-            # Send all messages
-            for msg in messages:
-                await update.message.reply_text(msg, parse_mode="Markdown")
+                    current_msg += line + "\n"
+            if current_msg.strip():
+                await update.message.reply_text(current_msg, parse_mode="Markdown")
         else:
-            await safe_delete_loading_message(loading_msg)
             await update.message.reply_text(latest_text, parse_mode="Markdown")
         
     except Exception as e:
@@ -2182,9 +2359,9 @@ async def main_async() -> None:
             BotCommand("stop", "Stop the dashboard server"),
             BotCommand("restart", "Restart the dashboard server"),
             BotCommand("status", "Check if dashboard is running"),
-            BotCommand("price", "Get latest price for a coin (e.g., /price BTC)"),
+            BotCommand("price", "Instant live price for a coin (e.g., /price BTC)"),
             BotCommand("coins", "List all available coins"),
-            BotCommand("latest", "Get latest prices for all coins"),
+            BotCommand("latest", "Live prices for all coins"),
             BotCommand("info", "Get detailed information for a coin (e.g., /info BTC)"),
         ]
         await application.bot.set_my_commands(commands)
