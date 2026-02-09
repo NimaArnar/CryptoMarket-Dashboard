@@ -639,10 +639,33 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         
         # Check if any dashboard is running (port check)
         if _check_dashboard_running():
-            # Find who started it
+            # Check if current user owns the running dashboard
+            user_owns_running = False
+            if user_id and user_id in dashboard_owners:
+                owner_info = dashboard_owners[user_id]
+                # Dashboard is running AND user is in owners list
+                if owner_info.get("process") and owner_info["process"].poll() is None:
+                    user_owns_running = True
+                elif _check_dashboard_running():
+                    # Process object might be stale, but dashboard is still running
+                    # If user_id matches, they likely own it
+                    user_owns_running = True
+            
+            if user_owns_running:
+                # User owns it, suggest using restart instead
+                await update.message.reply_text(
+                    "⚠️ *Dashboard is already running*\n\n"
+                    "You already have a dashboard running.\n"
+                    "Use /restart to restart it, or /stop to stop it."
+                )
+                return
+            
+            # Find who started it (if not current user)
             running_owner = None
             for uid, info in dashboard_owners.items():
-                if info["process"] and info["process"].poll() is None:
+                if uid == user_id:
+                    continue  # Skip current user
+                if info.get("process") and info["process"].poll() is None:
                     running_owner = info
                     break
             
@@ -978,12 +1001,23 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     # Check if this user owns a running dashboard
     user_owns_dashboard = False
-    if user_id in dashboard_owners:
+    dashboard_running = _check_dashboard_running()
+    
+    # User owns dashboard if:
+    # 1. Dashboard is running on port AND
+    # 2. User_id is in dashboard_owners (even if process object is stale)
+    if dashboard_running and user_id in dashboard_owners:
         owner_info = dashboard_owners[user_id]
-        dashboard_process = owner_info["process"]
-        if dashboard_process and dashboard_process.poll() is None:
-            tracked_pid = dashboard_process.pid
-            user_owns_dashboard = True
+        dashboard_process = owner_info.get("process")
+        if dashboard_process:
+            # Process object exists, check if it's still valid
+            if dashboard_process.poll() is None:
+                tracked_pid = dashboard_process.pid
+                user_owns_dashboard = True
+            elif dashboard_running:
+                # Process object is stale but dashboard is still running on port
+                # User still owns it (process might have been restarted externally)
+                user_owns_dashboard = True
     
     # If user doesn't own a dashboard, check if any dashboard is running
     if not user_owns_dashboard and _check_dashboard_running():
@@ -1109,9 +1143,14 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     dashboard_running = _check_dashboard_running()
     user_owns_dashboard = False
     
-    if user_id in dashboard_owners:
+    # User owns dashboard if:
+    # 1. Dashboard is running on port AND
+    # 2. User_id is in dashboard_owners (even if process object is stale)
+    if dashboard_running and user_id in dashboard_owners:
         owner_info = dashboard_owners[user_id]
-        if owner_info["process"] and owner_info["process"].poll() is None:
+        # Check if process is still valid, or if port is in use (dashboard still running)
+        process_valid = owner_info.get("process") and owner_info["process"].poll() is None
+        if process_valid or dashboard_running:
             user_owns_dashboard = True
     
     if not dashboard_running:
@@ -1203,10 +1242,20 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     running_owner = None
     running_process = None
     if any_dashboard_running:
+        # First try to find owner with valid process object
         for uid, info in dashboard_owners.items():
-            if info["process"] and info["process"].poll() is None:
+            if info.get("process") and info["process"].poll() is None:
                 running_owner = {"user_id": uid, "username": info.get("username", "unknown"), "started_at": info.get("started_at")}
                 running_process = info["process"]
+                break
+        
+        # If no owner found but dashboard is running, check if any user in dashboard_owners
+        # (process object might be stale but dashboard still running)
+        if not running_owner:
+            for uid, info in dashboard_owners.items():
+                # Dashboard is running and user is in owners list - they likely own it
+                running_owner = {"user_id": uid, "username": info.get("username", "unknown"), "started_at": info.get("started_at")}
+                running_process = info.get("process")  # Might be None if stale
                 break
     
     # Debug logging
