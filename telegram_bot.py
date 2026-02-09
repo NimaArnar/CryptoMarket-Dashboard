@@ -2393,11 +2393,16 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             if price_change is not None:
                 pct = price_change["pct_change"]
                 abs_ch = price_change["abs_change"]
+                start_val = price_change["start_value"]
+                end_val = price_change["end_value"]
                 emoji = "📈" if pct >= 0 else "📉"
                 lines.append(
                     f"{emoji} Price: {pct:+.2f}%  "
                     f"(${abs_ch:+,.2f}, {price_change['start_date'].strftime('%Y-%m-%d')} → "
                     f"{price_change['end_date'].strftime('%Y-%m-%d')})"
+                )
+                lines.append(
+                    f"   ${start_val:,.2f} → ${end_val:,.2f}"
                 )
 
                 # Only show high/low for 1y by default (to avoid clutter)
@@ -2410,11 +2415,35 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             if mc_change is not None:
                 pct = mc_change["pct_change"]
                 abs_ch = mc_change["abs_change"]
+                start_val = mc_change["start_value"]
+                end_val = mc_change["end_value"]
                 emoji = "📈" if pct >= 0 else "📉"
                 lines.append(
                     f"{emoji} Market Cap: {pct:+.2f}%  "
                     f"(${abs_ch:+,.0f}, {mc_change['start_date'].strftime('%Y-%m-%d')} → "
                     f"{mc_change['end_date'].strftime('%Y-%m-%d')})"
+                )
+                # Format market cap nicely (B/M/K)
+                if start_val >= 1e12:
+                    start_str = f"${start_val / 1e12:.2f}T"
+                elif start_val >= 1e9:
+                    start_str = f"${start_val / 1e9:.2f}B"
+                elif start_val >= 1e6:
+                    start_str = f"${start_val / 1e6:.2f}M"
+                else:
+                    start_str = f"${start_val:,.0f}"
+                
+                if end_val >= 1e12:
+                    end_str = f"${end_val / 1e12:.2f}T"
+                elif end_val >= 1e9:
+                    end_str = f"${end_val / 1e9:.2f}B"
+                elif end_val >= 1e6:
+                    end_str = f"${end_val / 1e6:.2f}M"
+                else:
+                    end_str = f"${end_val:,.0f}"
+                
+                lines.append(
+                    f"   {start_str} → {end_str}"
                 )
 
             lines.append("")
