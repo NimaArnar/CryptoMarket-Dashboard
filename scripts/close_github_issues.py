@@ -29,7 +29,8 @@ GITHUB_API_BASE = "https://api.github.com"
 
 # Issues that were fixed
 # NOTE: 15 = Instant price feature for Telegram bot
-FIXED_ISSUES = [15, 19, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
+# NOTE: 17 = Timeframe summary (1d/1w/1m/1y) feature for Telegram bot
+FIXED_ISSUES = [15, 17, 19, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
 
 # Commit hash (will be updated)
 COMMIT_HASH = "HEAD"
