@@ -28,20 +28,20 @@ This directory contains issue templates for problems found during code review.
 16. **016-1year-chart-image.md** - Feature: 1 year chart image of coins
 17. **017-timeframe-summary.md** - Feature: 1d, 1w, 1m and 1y summary for coins ✅ Fixed
 18. **018-telegram-command-bar.md** - Enhancement: Show command bar in Telegram using "/" button (High priority)
-19. **019-enhance-info-command.md** - Enhancement: Show full coin details in /info command (High priority)
-20. **020-bot-bio-and-about-button.md** - Enhancement: Add bot bio information and "What's this bot for?" button (Medium priority)
-21. **021-fix-about-button-behavior.md** - Bug: Fix "What's this bot for?" button behavior (Medium priority)
-22. **022-add-about-to-command-bar.md** - Enhancement: Add "What's this bot for?" to Telegram command bar (Low priority)
+19. **019-enhance-info-command.md** - Enhancement: Show full coin details in /info command (High priority) ✅ Fixed
+20. **020-bot-bio-and-about-button.md** - Enhancement: Add bot bio information and "What's this bot for?" button (Medium priority) ✅ Fixed
+21. **021-fix-about-button-behavior.md** - Bug: Fix "What's this bot for?" button behavior (Medium priority) ✅ Fixed
+22. **022-add-about-to-command-bar.md** - Enhancement: Add "What's this bot for?" to Telegram command bar (Low priority) ✅ Fixed
 23. **023-help-menu-simplify-buttons.md** - Bug: Help menu should only show 2 buttons (Medium priority) ✅ Fixed
 24. **024-about-button-edit-message.md** - Bug: About button should edit message, not send new (Medium priority) ✅ Fixed
 25. **025-about-screen-single-button.md** - Bug: About screen should only show back button (Medium priority) ✅ Fixed
-26. **026-add-info-button-to-menus.md** - Enhancement: Add Info button to menus (Medium priority)
+26. **026-add-info-button-to-menus.md** - Enhancement: Add Info button to menus (Medium priority) ✅ Fixed
 27. **027-reduce-emojis-in-data-display.md** - Enhancement: Reduce emojis in data display - too crowded (Medium priority) ✅ Fixed
-28. **028-remove-marketcap-button.md** - Enhancement: Remove marketcap button - unessential (Low priority)
-29. **029-latest-show-all-coins.md** - Enhancement: /latest should show latest price of all coins (Medium priority)
-30. **030-remove-category-from-data-displays.md** - Enhancement: Remove category from data displays - only show in /info (Low priority)
-31. **031-add-timestamp-latest-update.md** - Enhancement: Add timestamp for latest update in relevant sections (Medium priority)
-32. **032-remove-marketcap-command-completely.md** - Enhancement: Remove marketcap command and functions completely (Low priority)
+28. **028-remove-marketcap-button.md** - Enhancement: Remove marketcap button - unessential (Low priority) ✅ Fixed
+29. **029-latest-show-all-coins.md** - Enhancement: /latest should show latest price of all coins (Medium priority) ✅ Fixed
+30. **030-remove-category-from-data-displays.md** - Enhancement: Remove category from data displays - only show in /info (Low priority) ✅ Fixed
+31. **031-add-timestamp-latest-update.md** - Enhancement: Add timestamp for latest update in relevant sections (Medium priority) ✅ Fixed
+32. **032-remove-marketcap-command-completely.md** - Enhancement: Remove marketcap command and functions completely (Low priority) ✅ Fixed
 
 ## Priority Guide
 
