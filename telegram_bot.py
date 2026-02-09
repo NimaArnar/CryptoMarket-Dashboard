@@ -625,10 +625,16 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("❌ Could not identify user.")
         return
     
+    # Normalize user_id to int for consistent comparison
+    user_id_int = int(user_id) if user_id else None
+    
     # Use lock to prevent race conditions
     async with dashboard_lock:
+        # Normalize all keys in dashboard_owners to int for comparison
+        normalized_owners = {int(k): v for k, v in dashboard_owners.items()}
+        
         # Check if this user already has a dashboard running
-        if user_id in dashboard_owners:
+        if user_id_int in normalized_owners:
             owner_info = dashboard_owners[user_id]
             if owner_info["process"] and owner_info["process"].poll() is None:
                 await update.message.reply_text(
@@ -641,10 +647,10 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if _check_dashboard_running():
             # Check if current user owns the running dashboard
             user_owns_running = False
-            if user_id and user_id in dashboard_owners:
+            if user_id_int and user_id_int in normalized_owners:
                 # User is in owners list and dashboard is running - they own it
                 user_owns_running = True
-                logger.debug(f"User {user_id} owns running dashboard (found in dashboard_owners)")
+                logger.debug(f"User {user_id_int} owns running dashboard (found in dashboard_owners)")
             
             if user_owns_running:
                 # User owns it, suggest using restart instead
@@ -660,8 +666,8 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             running_owner_id = None
             
             # First try to find owner with valid process
-            for uid, info in dashboard_owners.items():
-                if uid == user_id:
+            for uid, info in normalized_owners.items():
+                if uid == user_id_int:
                     continue  # Skip current user
                 process = info.get("process")
                 if process and process.poll() is None:
@@ -670,9 +676,9 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     break
             
             # If no valid process found, check all owners (process might be stale)
-            if not running_owner and dashboard_owners:
-                for uid, info in dashboard_owners.items():
-                    if uid == user_id:
+            if not running_owner and normalized_owners:
+                for uid, info in normalized_owners.items():
+                    if uid == user_id_int:
                         continue  # Skip current user
                     running_owner = info
                     running_owner_id = uid
@@ -710,12 +716,14 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         
         # Track this user as the owner
+        # Ensure user_id is int for consistent storage
         username = user.username if user and user.username else "unknown"
-        dashboard_owners[user_id] = {
+        dashboard_owners[user_id_int] = {
             "process": dashboard_process,
             "started_at": datetime.now(),
             "username": username
         }
+        logger.info(f"Stored dashboard owner: user_id={user_id_int} (username={username})")
         
         # Wait a moment to check if process started
         time.sleep(2)
@@ -1175,21 +1183,33 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text("❌ Could not identify user.")
         return
     
+    # Normalize user_id to int for consistent comparison
+    user_id_int = int(user_id) if user_id else None
+    
     # Check if dashboard is running and if user owns it
     dashboard_running = _check_dashboard_running()
     user_owns_dashboard = False
+    
+    # Log current state for debugging
+    logger.info(f"Restart command - user_id: {user_id_int} (original: {user_id}, type: {type(user_id)})")
+    logger.info(f"Dashboard running: {dashboard_running}")
+    logger.info(f"dashboard_owners keys: {list(dashboard_owners.keys())}")
+    logger.info(f"dashboard_owners types: {[type(k) for k in dashboard_owners.keys()]}")
     
     # User owns dashboard if:
     # 1. Dashboard is running on port AND
     # 2. User_id is in dashboard_owners (even if process object is stale)
     if dashboard_running:
-        if user_id in dashboard_owners:
+        # Normalize all keys in dashboard_owners to int for comparison
+        normalized_owners = {int(k): v for k, v in dashboard_owners.items()}
+        
+        if user_id_int in normalized_owners:
             # User is in owners list and dashboard is running - they own it
             user_owns_dashboard = True
-            logger.debug(f"User {user_id} owns dashboard (found in dashboard_owners)")
+            logger.info(f"User {user_id_int} owns dashboard (found in dashboard_owners)")
         else:
             # Dashboard running but user not in owners - check if anyone else owns it
-            logger.debug(f"User {user_id} not in dashboard_owners, checking other owners")
+            logger.warning(f"User {user_id_int} not in dashboard_owners. Keys: {list(normalized_owners.keys())}")
     
     if not dashboard_running:
         # Dashboard not running, just start it
@@ -1202,8 +1222,11 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         running_owner = None
         running_owner_id = None
         
+        # Normalize all keys to int for comparison
+        normalized_owners = {int(k): v for k, v in dashboard_owners.items()}
+        
         # First try to find owner with valid process
-        for uid, info in dashboard_owners.items():
+        for uid, info in normalized_owners.items():
             process = info.get("process")
             if process and process.poll() is None:
                 running_owner = info
@@ -1212,26 +1235,30 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
         # If no valid process found but dashboard is running, check all owners
         # (process might be stale but dashboard still running)
-        if not running_owner and dashboard_owners:
+        if not running_owner and normalized_owners:
             # If only one owner exists and dashboard is running, they likely own it
-            if len(dashboard_owners) == 1:
-                uid = list(dashboard_owners.keys())[0]
-                running_owner = dashboard_owners[uid]
+            if len(normalized_owners) == 1:
+                uid = list(normalized_owners.keys())[0]
+                running_owner = normalized_owners[uid]
                 running_owner_id = uid
             else:
                 # Multiple owners - use the first one as fallback
-                uid = list(dashboard_owners.keys())[0]
-                running_owner = dashboard_owners[uid]
+                uid = list(normalized_owners.keys())[0]
+                running_owner = normalized_owners[uid]
                 running_owner_id = uid
         
         if running_owner:
             owner_username = running_owner.get("username", "another user")
-            # Check if it's actually the current user (might be stale process check)
-            if running_owner_id == user_id:
+            # Compare normalized IDs
+            logger.info(f"Restart: Comparing running_owner_id={running_owner_id} (type: {type(running_owner_id)}) vs user_id_int={user_id_int} (type: {type(user_id_int)})")
+            
+            if running_owner_id == user_id_int:
                 # User actually owns it, proceed with restart
-                logger.debug(f"User {user_id} owns dashboard (matched by ID)")
+                logger.info(f"User {user_id_int} owns dashboard (matched by ID)")
                 user_owns_dashboard = True
+                # Don't return - continue to restart logic below
             else:
+                logger.warning(f"Restart: Ownership mismatch - running_owner_id={running_owner_id} != user_id_int={user_id_int}")
                 await update.message.reply_text(
                     f"⚠️ *You don't own the running dashboard*\n\n"
                     f"Started by: @{owner_username}\n"
