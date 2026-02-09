@@ -42,6 +42,10 @@ This directory contains issue templates for problems found during code review.
 30. **030-remove-category-from-data-displays.md** - Enhancement: Remove category from data displays - only show in /info (Low priority) ✅ Fixed
 31. **031-add-timestamp-latest-update.md** - Enhancement: Add timestamp for latest update in relevant sections (Medium priority) ✅ Fixed
 32. **032-remove-marketcap-command-completely.md** - Enhancement: Remove marketcap command and functions completely (Low priority) ✅ Fixed
+33. **033-add-chart-summary-buttons-data-queries.md** - Enhancement: Add Chart and Summary buttons to Data Queries menu (Medium priority)
+34. **034-default-single-coin-actions-to-btc.md** - Enhancement: Default all single-coin actions to BTC instead of ETH (Medium priority)
+35. **035-remove-eth-price-info-buttons.md** - Enhancement: Remove ETH-specific Price and Info buttons from menus (Medium priority)
+36. **036-section-navigation-flow-description.md** - Enhancement: Add section navigation flow - show description before data (Medium priority)
 
 ## Priority Guide
 
