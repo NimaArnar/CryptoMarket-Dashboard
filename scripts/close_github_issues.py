@@ -31,7 +31,11 @@ GITHUB_API_BASE = "https://api.github.com"
 # NOTE: 15 = Instant price feature for Telegram bot
 # NOTE: 16 = Chart image feature (1w/1m/1y price & index charts) for Telegram bot
 # NOTE: 17 = Timeframe summary (1d/1w/1m/1y) feature for Telegram bot
-FIXED_ISSUES = [15, 16, 17, 19, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
+# NOTE: 34 = Add Chart/Summary buttons to Data Queries menu (Telegram bot)
+# NOTE: 35 = Default all single-coin actions to BTC instead of ETH (Telegram bot)
+# NOTE: 36 = Remove ETH-specific Price/Info buttons from menus (Telegram bot)
+# NOTE: 37 = Add section navigation flow - show description before data (Telegram bot)
+FIXED_ISSUES = [15, 16, 17, 19, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37]
 
 # Commit hash (will be updated)
 COMMIT_HASH = "HEAD"
