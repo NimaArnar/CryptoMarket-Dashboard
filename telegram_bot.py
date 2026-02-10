@@ -121,9 +121,6 @@ def create_main_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("💰 Data Queries", callback_data="menu_data")
         ],
         [
-            InlineKeyboardButton("⚡ Quick Actions", callback_data="menu_quick")
-        ],
-        [
             InlineKeyboardButton("❓ Help", callback_data="help")
         ]
     ]
@@ -193,28 +190,6 @@ def create_data_keyboard() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton("📊 Summary (BTC)", callback_data="summary_BTC"),
             InlineKeyboardButton("📈 Chart (BTC)", callback_data="chartbtn_BTC"),
-        ],
-        [
-            InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
-        ]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def create_quick_actions_keyboard() -> InlineKeyboardMarkup:
-    """Create keyboard for quick actions (popular coins)."""
-    keyboard = [
-        [
-            InlineKeyboardButton("₿ BTC", callback_data="price_BTC"),
-            InlineKeyboardButton("BNB", callback_data="price_BNB")
-        ],
-        [
-            InlineKeyboardButton("🔗 LINK", callback_data="price_LINK"),
-            InlineKeyboardButton("🔷 ARB", callback_data="price_ARB"),
-            InlineKeyboardButton("🔺 AVAX", callback_data="price_AVAX")
-        ],
-        [
-            InlineKeyboardButton("📊 Info (BTC)", callback_data="info_BTC"),
         ],
         [
             InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
@@ -296,20 +271,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             text="💰 *Data Queries*\n\nGet real-time cryptocurrency data:",
             parse_mode="Markdown",
             reply_markup=create_data_keyboard()
-        )
-        return
-    
-    elif data == "menu_quick":
-        try:
-            await query.message.delete()
-        except Exception as e:
-            logger.debug(f"Could not delete message: {e}")
-        
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="⚡ *Quick Actions*\n\nQuick access to popular coins:",
-            parse_mode="Markdown",
-            reply_markup=create_quick_actions_keyboard()
         )
         return
     

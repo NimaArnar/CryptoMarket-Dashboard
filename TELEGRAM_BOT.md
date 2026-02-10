@@ -32,8 +32,7 @@ A comprehensive Telegram bot for controlling your Crypto Market Dashboard remote
 
 ### Interactive Interface
 - **Inline Keyboards**: Navigate commands with interactive buttons
-- **Quick Actions**: Fast access to popular coins (BTC, ETH, etc.)
-- **Menu Navigation**: Organized command menus
+- **Menu Navigation**: Organized command menus (Dashboard Control, Data Queries, Help)
 - **Smart Message Management**: Button messages automatically cleaned up to avoid chat clutter
 
 ### User Management
