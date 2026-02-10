@@ -186,11 +186,13 @@ def create_data_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("💵 Price (BTC)", callback_data="price_BTC"),
-            InlineKeyboardButton("💵 Price (ETH)", callback_data="price_ETH")
         ],
         [
             InlineKeyboardButton("📊 Info (BTC)", callback_data="info_BTC"),
-            InlineKeyboardButton("📊 Info (ETH)", callback_data="info_ETH")
+        ],
+        [
+            InlineKeyboardButton("📊 Summary (BTC)", callback_data="summary_BTC"),
+            InlineKeyboardButton("📈 Chart (BTC)", callback_data="chartbtn_BTC"),
         ],
         [
             InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
@@ -204,7 +206,6 @@ def create_quick_actions_keyboard() -> InlineKeyboardMarkup:
     keyboard = [
         [
             InlineKeyboardButton("₿ BTC", callback_data="price_BTC"),
-            InlineKeyboardButton("Ξ ETH", callback_data="price_ETH"),
             InlineKeyboardButton("BNB", callback_data="price_BNB")
         ],
         [
@@ -214,7 +215,6 @@ def create_quick_actions_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("📊 Info (BTC)", callback_data="info_BTC"),
-            InlineKeyboardButton("📊 Info (ETH)", callback_data="info_ETH")
         ],
         [
             InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
@@ -449,6 +449,20 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Price and marketcap commands with symbol
     elif data.startswith("price_"):
         symbol = data.split("_")[1]
+        # Show section description before sending data
+        price_desc = (
+            "💵 *Price Section*\n\n"
+            "Use /price <SYMBOL> to get instant live prices from CoinGecko.\n"
+            "This button shows the current price for the selected coin using live API data."
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=price_desc,
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.debug(f"Failed to send price section description: {e}")
         context.args = [symbol]
         cmd_update = create_update_from_query()
         await price_command(cmd_update, context)
@@ -456,6 +470,20 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     elif data.startswith("info_"):
         symbol = data.split("_")[1]
+        # Show section description before sending data
+        info_desc = (
+            "📊 *Info Section*\n\n"
+            "Use /info <SYMBOL> to get detailed coin information from the dashboard history.\n"
+            "This button shows fundamental and historical metrics for the selected coin."
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=info_desc,
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.debug(f"Failed to send info section description: {e}")
         context.args = [symbol]
         cmd_update = create_update_from_query()
         await info_command(cmd_update, context)
@@ -479,6 +507,49 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             context.args = [symbol, timeframe]
             cmd_update = create_update_from_query()
             await chart_command(cmd_update, context)
+        return
+
+    # Summary command with symbol (from menu/button)
+    elif data.startswith("summary_"):
+        symbol = data.split("_")[1]
+        summary_desc = (
+            "📊 *Summary Section*\n\n"
+            "Use /summary <SYMBOL> [1d|1w|1m|1y] to get timeframe performance for price and market cap.\n"
+            "This button shows BTC performance across all standard timeframes."
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=summary_desc,
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.debug(f"Failed to send summary section description: {e}")
+        context.args = [symbol]
+        cmd_update = create_update_from_query()
+        await summary_command(cmd_update, context)
+        return
+
+    # Chart command from menu/button (default BTC, 1y) with section description
+    elif data.startswith("chartbtn_"):
+        symbol = data.split("_")[1]
+        chart_desc = (
+            "📈 *Chart Section*\n\n"
+            "Use /chart <SYMBOL> [1w|1m|1y] to get price & index charts with dual logarithmic axes.\n"
+            "This button shows a BTC chart using the best available data resolution."
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=chart_desc,
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.debug(f"Failed to send chart section description: {e}")
+        # Default timeframe handled inside chart_command (1y if not provided)
+        context.args = [symbol]
+        cmd_update = create_update_from_query()
+        await chart_command(cmd_update, context)
         return
 
 
@@ -1917,13 +1988,13 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     Fetches live data directly from CoinGecko API. No dashboard required.
     Falls back to cached historical data if API call fails and dashboard is running.
     """
-    # Track user action
-    symbol = context.args[0].upper() if context.args and len(context.args) > 0 else "none"
+    # Track user action (use BTC as default when no symbol provided)
+    symbol = context.args[0].upper() if context.args and len(context.args) > 0 else "BTC"
     log_user_action(update, "command", f"/price {symbol}")
     
+    # Default to BTC if no symbol argument is provided
     if not context.args:
-        await update.message.reply_text("❌ Please specify a coin symbol. Example: /price BTC")
-        return
+        context.args = ["BTC"]
     
     symbol = context.args[0].upper()
     
@@ -2220,13 +2291,13 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 @rate_limit(max_calls=15, period=60)
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /info command - get detailed information for a coin."""
-    # Track user action
-    symbol = context.args[0].upper() if context.args and len(context.args) > 0 else "none"
+    # Track user action (use BTC as default when no symbol provided)
+    symbol = context.args[0].upper() if context.args and len(context.args) > 0 else "BTC"
     log_user_action(update, "command", f"/info {symbol}")
     
+    # Default to BTC if no symbol argument is provided
     if not context.args:
-        await update.message.reply_text("❌ Please specify a coin symbol. Example: /info BTC")
-        return
+        context.args = ["BTC"]
     
     symbol = context.args[0].upper()
     
@@ -2450,10 +2521,9 @@ def _compute_timeframe_change(series: Optional[pd.Series], days: int) -> Optiona
 @rate_limit(max_calls=10, period=60)
 async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /summary command - 1d, 1w, 1m, 1y summary for a coin."""
-    # Parse args
+    # Parse args - default to BTC when no symbol is provided
     if not context.args:
-        await update.message.reply_text("❌ Please specify a coin symbol. Example: /summary BTC")
-        return
+        context.args = ["BTC"]
 
     symbol = context.args[0].upper()
     timeframe_arg = context.args[1].lower() if len(context.args) > 1 else "all"
@@ -2894,17 +2964,9 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
 @rate_limit(max_calls=10, period=60)
 async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /chart command - generate and send chart image with dual Y-axes (price + indexed)."""
-    # Parse args
+    # Parse args - default to BTC and 1y when no arguments provided
     if not context.args:
-        await update.message.reply_text(
-            "❌ Please specify a coin symbol and optional timeframe.\n\n"
-            "Examples:\n"
-            "/chart BTC\n"
-            "/chart BTC 1w\n"
-            "/chart ETH 1m\n"
-            "/chart DOGE 1y"
-        )
-        return
+        context.args = ["BTC"]
     
     symbol = context.args[0].upper()
     timeframe_arg = context.args[1].lower() if len(context.args) > 1 else "1y"
