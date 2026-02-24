@@ -961,3 +961,34 @@ def _corr_and_scatter_internal(
     
     return text, scat
 
+
+def compute_correlation_for_bot(
+    df_raw: pd.DataFrame, symbol_a: str, symbol_b: str
+) -> Tuple[str, go.Figure]:
+    """
+    Compute correlation and scatter figure for two symbols (for Telegram bot).
+    Uses same logic as dashboard: returns correlation, beta, positive/negative days, scatter plot.
+    """
+    if df_raw is None or df_raw.empty:
+        empty_fig = go.Figure()
+        empty_fig.update_layout(
+            xaxis_title="Returns of A",
+            yaxis_title="Returns of B",
+            margin=dict(t=30, r=30, l=60, b=50),
+            annotations=[dict(
+                text="No data available.",
+                x=0.5, y=0.5, xref="paper", yref="paper", showarrow=False
+            )],
+        )
+        return "No market cap data loaded. Start the dashboard and try again.", empty_fig
+    state = {
+        "view": DEFAULT_VIEW,
+        "smoothing": DEFAULT_SMOOTHING,
+        "corr_mode": "returns",
+    }
+    order = list(df_raw.columns)
+    if DOM_SYM not in df_raw.columns:
+        order.append(DOM_SYM)
+    selected_syms = [symbol_a, symbol_b]
+    return _corr_and_scatter_internal(state, selected_syms, order, df_raw)
+

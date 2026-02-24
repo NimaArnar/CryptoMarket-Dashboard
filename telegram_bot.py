@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict
 
 import pandas as pd
+import plotly.graph_objects as go
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram import Update as UpdateClass
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
@@ -120,9 +121,6 @@ def create_main_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("💰 Data Queries", callback_data="menu_data")
         ],
         [
-            InlineKeyboardButton("⚡ Quick Actions", callback_data="menu_quick")
-        ],
-        [
             InlineKeyboardButton("❓ Help", callback_data="help")
         ]
     ]
@@ -184,12 +182,17 @@ def create_data_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("📈 Latest Prices", callback_data="cmd_latest")
         ],
         [
+            InlineKeyboardButton("📊 Correlation (BTC vs ETH)", callback_data="menu_corr")
+        ],
+        [
             InlineKeyboardButton("💵 Price (BTC)", callback_data="price_BTC"),
-            InlineKeyboardButton("💵 Price (ETH)", callback_data="price_ETH")
         ],
         [
             InlineKeyboardButton("📊 Info (BTC)", callback_data="info_BTC"),
-            InlineKeyboardButton("📊 Info (ETH)", callback_data="info_ETH")
+        ],
+        [
+            InlineKeyboardButton("📊 Summary (BTC)", callback_data="summary_BTC"),
+            InlineKeyboardButton("📈 Chart (BTC)", callback_data="chartbtn_BTC"),
         ],
         [
             InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
@@ -198,28 +201,40 @@ def create_data_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
-def create_quick_actions_keyboard() -> InlineKeyboardMarkup:
-    """Create keyboard for quick actions (popular coins)."""
+def create_correlation_keyboard(exclude_symbol: Optional[str] = None) -> InlineKeyboardMarkup:
+    """Create keyboard for correlation: default BTC vs ETH + buttons for all coins.
+    When exclude_symbol is set (e.g. first coin chosen), that symbol is omitted from the list."""
+    from src.constants import COINS, DOM_SYM
+    symbols = sorted([sym for _, sym, _, _ in COINS])
+    symbols.append(DOM_SYM)
+    if exclude_symbol:
+        symbols = [s for s in symbols if s != exclude_symbol]
     keyboard = [
-        [
-            InlineKeyboardButton("₿ BTC", callback_data="price_BTC"),
-            InlineKeyboardButton("Ξ ETH", callback_data="price_ETH"),
-            InlineKeyboardButton("BNB", callback_data="price_BNB")
-        ],
-        [
-            InlineKeyboardButton("🔗 LINK", callback_data="price_LINK"),
-            InlineKeyboardButton("🔷 ARB", callback_data="price_ARB"),
-            InlineKeyboardButton("🔺 AVAX", callback_data="price_AVAX")
-        ],
-        [
-            InlineKeyboardButton("📊 Info (BTC)", callback_data="info_BTC"),
-            InlineKeyboardButton("📊 Info (ETH)", callback_data="info_ETH")
-        ],
-        [
-            InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
-        ]
+        [InlineKeyboardButton("📊 Default: BTC vs ETH", callback_data="corr_default")]
     ]
+    # Coin buttons in rows of 4
+    row_size = 4
+    for i in range(0, len(symbols), row_size):
+        row = [
+            InlineKeyboardButton(sym, callback_data=f"corr_coin_{sym}")
+            for sym in symbols[i : i + row_size]
+        ]
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton("🔙 Back to Data Queries", callback_data="menu_data")])
     return InlineKeyboardMarkup(keyboard)
+
+
+async def _send_data_menu(chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send the Data Queries menu so it becomes the latest message (for UX after Data Queries actions)."""
+    try:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="💰 *Data Queries*\n\nGet real-time cryptocurrency data:",
+            parse_mode="Markdown",
+            reply_markup=create_data_keyboard()
+        )
+    except Exception as e:
+        logger.debug(f"Failed to resend Data Queries menu: {e}")
 
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -298,18 +313,108 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return
     
-    elif data == "menu_quick":
+    elif data == "menu_corr":
         try:
             await query.message.delete()
         except Exception as e:
             logger.debug(f"Could not delete message: {e}")
-        
         await context.bot.send_message(
             chat_id=chat_id,
-            text="⚡ *Quick Actions*\n\nQuick access to popular coins:",
+            text="📊 *Correlation*\n\nChoose default BTC vs ETH or tap two coins (first, then second):",
             parse_mode="Markdown",
-            reply_markup=create_quick_actions_keyboard()
+            reply_markup=create_correlation_keyboard()
         )
+        return
+    
+    elif data == "corr_default":
+        if not _check_dashboard_running():
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="⚠️ Dashboard is offline. Use /run to start it first.",
+                parse_mode="Markdown"
+            )
+            await _send_data_menu(chat_id, context)
+            return
+        try:
+            await query.edit_message_text("🔄 Computing correlation BTC vs ETH...")
+        except Exception:
+            pass
+        loop = asyncio.get_event_loop()
+        try:
+            corr_text, chart_path = await loop.run_in_executor(
+                None, _compute_and_export_correlation, "BTC", "ETH"
+            )
+            caption = f"📊 Correlation: BTC vs ETH\n\n{corr_text}"
+            if chart_path and chart_path.exists():
+                with open(chart_path, "rb") as photo:
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=photo,
+                        caption=caption[:1024] if len(caption) > 1024 else caption,
+                    )
+            else:
+                await context.bot.send_message(chat_id=chat_id, text=f"📊 Correlation\n\n{corr_text}")
+        except Exception as e:
+            logger.error(f"Correlation error: {e}")
+            await context.bot.send_message(chat_id=chat_id, text=f"❌ Error: {str(e)}")
+        await _send_data_menu(chat_id, context)
+        return
+    
+    elif data.startswith("corr_coin_"):
+        sym = data.replace("corr_coin_", "")
+        first = context.user_data.get("corr_first")
+        if first is None:
+            context.user_data["corr_first"] = sym
+            # Second selection keyboard excludes the first coin so user cannot pick same coin twice
+            try:
+                await query.edit_message_text(
+                    f"📊 First coin: *{sym}*. Tap the second coin:",
+                    parse_mode="Markdown",
+                    reply_markup=create_correlation_keyboard(exclude_symbol=sym)
+                )
+            except Exception:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"📊 First coin: {sym}. Tap the second coin:",
+                    reply_markup=create_correlation_keyboard(exclude_symbol=sym)
+                )
+            return
+        # exclude_symbol ensures first != sym in UI; this branch is only if state was stale
+        if first == sym:
+            await query.answer("Pick a different coin as second.", show_alert=True)
+            return
+        context.user_data.pop("corr_first", None)
+        if not _check_dashboard_running():
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="⚠️ Dashboard is offline. Use /run to start it first.",
+                parse_mode="Markdown"
+            )
+            await _send_data_menu(chat_id, context)
+            return
+        try:
+            await query.edit_message_text(f"🔄 Computing correlation {first} vs {sym}...")
+        except Exception:
+            pass
+        loop = asyncio.get_event_loop()
+        try:
+            corr_text, chart_path = await loop.run_in_executor(
+                None, _compute_and_export_correlation, first, sym
+            )
+            caption = f"📊 Correlation: {first} vs {sym}\n\n{corr_text}"
+            if chart_path and chart_path.exists():
+                with open(chart_path, "rb") as photo:
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=photo,
+                        caption=caption[:1024] if len(caption) > 1024 else caption,
+                    )
+            else:
+                await context.bot.send_message(chat_id=chat_id, text=f"📊 Correlation\n\n{corr_text}")
+        except Exception as e:
+            logger.error(f"Correlation error: {e}")
+            await context.bot.send_message(chat_id=chat_id, text=f"❌ Error: {str(e)}")
+        await _send_data_menu(chat_id, context)
         return
     
     elif data == "about":
@@ -358,11 +463,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "*/stop* - Stop the dashboard server\n"
             "*/restart* - Restart the dashboard server\n"
             "*/status* - Check if dashboard is running\n\n"
-            "💰 *Data Queries:*\n"
-            "*/price <SYMBOL>* - Get latest price (e.g., /price BTC)\n"
+            "💰 *Data Queries (live, no dashboard needed):*\n"
+            "*/price <SYMBOL>* - Instant price (e.g., /price BTC)\n"
             "*/coins* - List all available coins\n"
-            "*/latest* - Latest prices for all coins\n"
-            "*/info <SYMBOL>* - Detailed coin information\n\n"
+            "*/latest* - Live prices for all coins\n"
+            "*/info <SYMBOL>* - Detailed coin information\n"
+            "*/summary <SYMBOL> [1d|1w|1m|1y]* - Timeframe summary\n"
+            "*/chart <SYMBOL> [1w|1m|1y]* - Price & index chart image\n"
+            "*/corr [COIN1] [COIN2]* - Correlation (default: BTC ETH)\n\n"
             f"🌐 Dashboard: http://127.0.0.1:{DASH_PORT}/"
         )
         
@@ -436,26 +544,58 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif data == "cmd_coins":
         # Edit the existing message instead of sending a new one
         await coins_command_edit(query, context, 1)
+        await _send_data_menu(chat_id, context)
         return
     
     elif data == "cmd_latest":
         cmd_update = create_update_from_query()
         await latest_command(cmd_update, context)
+        await _send_data_menu(chat_id, context)
         return
     
     # Price and marketcap commands with symbol
     elif data.startswith("price_"):
         symbol = data.split("_")[1]
+        # Show section description before sending data
+        price_desc = (
+            "💵 *Price Section*\n\n"
+            "Use /price <SYMBOL> to get instant live prices from CoinGecko.\n"
+            "This button shows the current price for the selected coin using live API data."
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=price_desc,
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.debug(f"Failed to send price section description: {e}")
         context.args = [symbol]
         cmd_update = create_update_from_query()
         await price_command(cmd_update, context)
+        await _send_data_menu(chat_id, context)
         return
     
     elif data.startswith("info_"):
         symbol = data.split("_")[1]
+        # Show section description before sending data
+        info_desc = (
+            "📊 *Info Section*\n\n"
+            "Use /info <SYMBOL> to get detailed coin information from the dashboard history.\n"
+            "This button shows fundamental and historical metrics for the selected coin."
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=info_desc,
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.debug(f"Failed to send info section description: {e}")
         context.args = [symbol]
         cmd_update = create_update_from_query()
         await info_command(cmd_update, context)
+        await _send_data_menu(chat_id, context)
         return
     
     # Pagination for coins command
@@ -465,6 +605,64 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Edit the existing message instead of sending a new one
         await coins_command_edit(query, context, int(page))
         return
+    
+    # Chart timeframe switching
+    elif data.startswith("chart_"):
+        # Format: chart_SYMBOL_TIMEFRAME
+        parts = data.split("_")
+        if len(parts) >= 3:
+            symbol = parts[1]
+            timeframe = parts[2]
+            context.args = [symbol, timeframe]
+            cmd_update = create_update_from_query()
+            await chart_command(cmd_update, context)
+            await _send_data_menu(chat_id, context)
+        return
+
+    # Summary command with symbol (from menu/button)
+    elif data.startswith("summary_"):
+        symbol = data.split("_")[1]
+        summary_desc = (
+            "📊 *Summary Section*\n\n"
+            "Use /summary <SYMBOL> [1d|1w|1m|1y] to get timeframe performance for price and market cap.\n"
+            "This button shows BTC performance across all standard timeframes."
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=summary_desc,
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.debug(f"Failed to send summary section description: {e}")
+        context.args = [symbol]
+        cmd_update = create_update_from_query()
+        await summary_command(cmd_update, context)
+        await _send_data_menu(chat_id, context)
+        return
+
+    # Chart command from menu/button (default BTC, 1y) with section description
+    elif data.startswith("chartbtn_"):
+        symbol = data.split("_")[1]
+        chart_desc = (
+            "📈 *Chart Section*\n\n"
+            "Use /chart <SYMBOL> [1w|1m|1y] to get price & index charts with dual logarithmic axes.\n"
+            "This button shows a BTC chart using the best available data resolution."
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=chart_desc,
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.debug(f"Failed to send chart section description: {e}")
+        # Default timeframe handled inside chart_command (1y if not provided)
+        context.args = [symbol]
+        cmd_update = create_update_from_query()
+        await chart_command(cmd_update, context)
+        await _send_data_menu(chat_id, context)
+        return
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -473,7 +671,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "🤖 *Crypto Market Dashboard Bot*\n\n"
         "Welcome! Use the buttons below to control your dashboard and get crypto data.\n\n"
         "You can also use commands directly:\n"
-        "/run, /stop, /restart, /status, /price, /coins, /latest, /info, /help"
+        "/run, /stop, /restart, /status, /price, /coins, /latest, /info, /summary, /chart, /corr, /help"
     )
     
     keyboard = create_main_keyboard()
@@ -567,11 +765,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "*/stop* - Stop the dashboard server\n"
         "*/restart* - Restart the dashboard server\n"
         "*/status* - Check if dashboard is running\n\n"
-        "💰 *Data Queries:*\n"
-        "*/price <SYMBOL>* - Get latest price (e.g., /price BTC)\n"
+        "💰 *Data Queries (live, no dashboard needed):*\n"
+        "*/price <SYMBOL>* - Instant price (e.g., /price BTC)\n"
         "*/coins* - List all available coins\n"
-        "*/latest* - Latest prices for all coins\n"
-        "*/info <SYMBOL>* - Detailed coin information\n\n"
+        "*/latest* - Live prices for all coins\n"
+        "*/info <SYMBOL>* - Detailed coin information\n"
+        "*/summary <SYMBOL> [1d|1w|1m|1y]* - Timeframe summary\n"
+        "*/chart <SYMBOL> [1w|1m|1y]* - Price & index chart image\n\n"
         f"🌐 Dashboard: http://127.0.0.1:{DASH_PORT}/"
     )
     await update.message.reply_text(
@@ -608,10 +808,16 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("❌ Could not identify user.")
         return
     
+    # Normalize user_id to int for consistent comparison
+    user_id_int = int(user_id) if user_id else None
+    
     # Use lock to prevent race conditions
     async with dashboard_lock:
+        # Normalize all keys in dashboard_owners to int for comparison
+        normalized_owners = {int(k): v for k, v in dashboard_owners.items()}
+        
         # Check if this user already has a dashboard running
-        if user_id in dashboard_owners:
+        if user_id_int in normalized_owners:
             owner_info = dashboard_owners[user_id]
             if owner_info["process"] and owner_info["process"].poll() is None:
                 await update.message.reply_text(
@@ -622,11 +828,43 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         
         # Check if any dashboard is running (port check)
         if _check_dashboard_running():
-            # Find who started it
+            # Check if current user owns the running dashboard
+            user_owns_running = False
+            if user_id_int and user_id_int in normalized_owners:
+                # User is in owners list and dashboard is running - they own it
+                user_owns_running = True
+                logger.debug(f"User {user_id_int} owns running dashboard (found in dashboard_owners)")
+            
+            if user_owns_running:
+                # User owns it, suggest using restart instead
+                await update.message.reply_text(
+                    "⚠️ *Dashboard is already running*\n\n"
+                    "You already have a dashboard running.\n"
+                    "Use /restart to restart it, or /stop to stop it."
+                )
+                return
+            
+            # Find who started it (if not current user)
             running_owner = None
-            for uid, info in dashboard_owners.items():
-                if info["process"] and info["process"].poll() is None:
+            running_owner_id = None
+            
+            # First try to find owner with valid process
+            for uid, info in normalized_owners.items():
+                if uid == user_id_int:
+                    continue  # Skip current user
+                process = info.get("process")
+                if process and process.poll() is None:
                     running_owner = info
+                    running_owner_id = uid
+                    break
+            
+            # If no valid process found, check all owners (process might be stale)
+            if not running_owner and normalized_owners:
+                for uid, info in normalized_owners.items():
+                    if uid == user_id_int:
+                        continue  # Skip current user
+                    running_owner = info
+                    running_owner_id = uid
                     break
             
             if running_owner:
@@ -661,12 +899,14 @@ async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         
         # Track this user as the owner
+        # Ensure user_id is int for consistent storage
         username = user.username if user and user.username else "unknown"
-        dashboard_owners[user_id] = {
+        dashboard_owners[user_id_int] = {
             "process": dashboard_process,
             "started_at": datetime.now(),
             "username": username
         }
+        logger.info(f"Stored dashboard owner: user_id={user_id_int} (username={username})")
         
         # Wait a moment to check if process started
         time.sleep(2)
@@ -956,35 +1196,79 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("❌ Could not identify user.")
         return
     
+    # Normalize user_id to int for consistent comparison
+    user_id_int = int(user_id) if user_id else None
+    
     stopped_any = False
     tracked_pid = None
     
     # Check if this user owns a running dashboard
     user_owns_dashboard = False
-    if user_id in dashboard_owners:
-        owner_info = dashboard_owners[user_id]
-        dashboard_process = owner_info["process"]
-        if dashboard_process and dashboard_process.poll() is None:
-            tracked_pid = dashboard_process.pid
+    dashboard_running = _check_dashboard_running()
+    
+    # Normalize all keys in dashboard_owners to int for comparison
+    normalized_owners = {int(k): v for k, v in dashboard_owners.items()}
+    
+    # User owns dashboard if:
+    # 1. Dashboard is running on port AND
+    # 2. User_id is in dashboard_owners (even if process object is stale)
+    if dashboard_running and user_id_int in normalized_owners:
+        owner_info = normalized_owners[user_id_int]
+        dashboard_process = owner_info.get("process")
+        if dashboard_process:
+            # Process object exists, check if it's still valid
+            if dashboard_process.poll() is None:
+                tracked_pid = dashboard_process.pid
+                user_owns_dashboard = True
+            else:
+                # Process object is stale but dashboard is still running on port
+                # User still owns it (process might have been restarted externally)
+                user_owns_dashboard = True
+        else:
+            # No process object but user is in owners and dashboard is running
             user_owns_dashboard = True
     
     # If user doesn't own a dashboard, check if any dashboard is running
-    if not user_owns_dashboard and _check_dashboard_running():
+    if not user_owns_dashboard and dashboard_running:
         # Find who owns the running dashboard
         running_owner = None
-        for uid, info in dashboard_owners.items():
-            if info["process"] and info["process"].poll() is None:
+        running_owner_id = None
+        
+        # First try to find owner with valid process
+        for uid, info in normalized_owners.items():
+            process = info.get("process")
+            if process and process.poll() is None:
                 running_owner = info
+                running_owner_id = uid
                 break
+        
+        # If no valid process found but dashboard is running, check all owners
+        if not running_owner and normalized_owners:
+            # If only one owner exists and dashboard is running, they likely own it
+            if len(normalized_owners) == 1:
+                uid = list(normalized_owners.keys())[0]
+                running_owner = normalized_owners[uid]
+                running_owner_id = uid
+            else:
+                # Multiple owners - use the first one as fallback
+                uid = list(normalized_owners.keys())[0]
+                running_owner = normalized_owners[uid]
+                running_owner_id = uid
         
         if running_owner:
             owner_username = running_owner.get("username", "another user")
-            await update.message.reply_text(
-                f"⚠️ *You don't own the running dashboard*\n\n"
-                f"Started by: @{owner_username}\n"
-                f"Only the owner can stop it with /stop."
-            )
-            return
+            # Check if it's actually the current user (might be stale process check)
+            if running_owner_id == user_id_int:
+                # User actually owns it, proceed with stop
+                logger.debug(f"User {user_id} owns dashboard (matched by ID in stop)")
+                user_owns_dashboard = True
+            else:
+                await update.message.reply_text(
+                    f"⚠️ *You don't own the running dashboard*\n\n"
+                    f"Started by: @{owner_username}\n"
+                    f"Only the owner can stop it with /stop."
+                )
+                return
         else:
             await update.message.reply_text(
                 "⚠️ *Dashboard is running, but you don't own it*\n\n"
@@ -1006,8 +1290,10 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             logger.error(f"Error stopping tracked process: {e}")
         finally:
             dashboard_process = None
-            # Remove from owners dict
-            if user_id in dashboard_owners:
+            # Remove from owners dict (check both normalized and original key)
+            if user_id_int in dashboard_owners:
+                del dashboard_owners[user_id_int]
+            elif user_id in dashboard_owners:
                 del dashboard_owners[user_id]
     
     # Also check for and stop manually started main.py processes
@@ -1088,14 +1374,33 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text("❌ Could not identify user.")
         return
     
+    # Normalize user_id to int for consistent comparison
+    user_id_int = int(user_id) if user_id else None
+    
     # Check if dashboard is running and if user owns it
     dashboard_running = _check_dashboard_running()
     user_owns_dashboard = False
     
-    if user_id in dashboard_owners:
-        owner_info = dashboard_owners[user_id]
-        if owner_info["process"] and owner_info["process"].poll() is None:
+    # Log current state for debugging
+    logger.info(f"Restart command - user_id: {user_id_int} (original: {user_id}, type: {type(user_id)})")
+    logger.info(f"Dashboard running: {dashboard_running}")
+    logger.info(f"dashboard_owners keys: {list(dashboard_owners.keys())}")
+    logger.info(f"dashboard_owners types: {[type(k) for k in dashboard_owners.keys()]}")
+    
+    # User owns dashboard if:
+    # 1. Dashboard is running on port AND
+    # 2. User_id is in dashboard_owners (even if process object is stale)
+    if dashboard_running:
+        # Normalize all keys in dashboard_owners to int for comparison
+        normalized_owners = {int(k): v for k, v in dashboard_owners.items()}
+        
+        if user_id_int in normalized_owners:
+            # User is in owners list and dashboard is running - they own it
             user_owns_dashboard = True
+            logger.info(f"User {user_id_int} owns dashboard (found in dashboard_owners)")
+        else:
+            # Dashboard running but user not in owners - check if anyone else owns it
+            logger.warning(f"User {user_id_int} not in dashboard_owners. Keys: {list(normalized_owners.keys())}")
     
     if not dashboard_running:
         # Dashboard not running, just start it
@@ -1104,21 +1409,53 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     
     if not user_owns_dashboard:
-        # Dashboard is running but user doesn't own it
+        # Dashboard is running but user doesn't own it - find who does
         running_owner = None
-        for uid, info in dashboard_owners.items():
-            if info["process"] and info["process"].poll() is None:
+        running_owner_id = None
+        
+        # Normalize all keys to int for comparison
+        normalized_owners = {int(k): v for k, v in dashboard_owners.items()}
+        
+        # First try to find owner with valid process
+        for uid, info in normalized_owners.items():
+            process = info.get("process")
+            if process and process.poll() is None:
                 running_owner = info
+                running_owner_id = uid
                 break
+        
+        # If no valid process found but dashboard is running, check all owners
+        # (process might be stale but dashboard still running)
+        if not running_owner and normalized_owners:
+            # If only one owner exists and dashboard is running, they likely own it
+            if len(normalized_owners) == 1:
+                uid = list(normalized_owners.keys())[0]
+                running_owner = normalized_owners[uid]
+                running_owner_id = uid
+            else:
+                # Multiple owners - use the first one as fallback
+                uid = list(normalized_owners.keys())[0]
+                running_owner = normalized_owners[uid]
+                running_owner_id = uid
         
         if running_owner:
             owner_username = running_owner.get("username", "another user")
-            await update.message.reply_text(
-                f"⚠️ *You don't own the running dashboard*\n\n"
-                f"Started by: @{owner_username}\n"
-                f"Only the owner can restart it."
-            )
-            return
+            # Compare normalized IDs
+            logger.info(f"Restart: Comparing running_owner_id={running_owner_id} (type: {type(running_owner_id)}) vs user_id_int={user_id_int} (type: {type(user_id_int)})")
+            
+            if running_owner_id == user_id_int:
+                # User actually owns it, proceed with restart
+                logger.info(f"User {user_id_int} owns dashboard (matched by ID)")
+                user_owns_dashboard = True
+                # Don't return - continue to restart logic below
+            else:
+                logger.warning(f"Restart: Ownership mismatch - running_owner_id={running_owner_id} != user_id_int={user_id_int}")
+                await update.message.reply_text(
+                    f"⚠️ *You don't own the running dashboard*\n\n"
+                    f"Started by: @{owner_username}\n"
+                    f"Only the owner can restart it."
+                )
+                return
         else:
             await update.message.reply_text(
                 "⚠️ *Dashboard is running, but you don't own it*\n\n"
@@ -1186,10 +1523,20 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     running_owner = None
     running_process = None
     if any_dashboard_running:
+        # First try to find owner with valid process object
         for uid, info in dashboard_owners.items():
-            if info["process"] and info["process"].poll() is None:
+            if info.get("process") and info["process"].poll() is None:
                 running_owner = {"user_id": uid, "username": info.get("username", "unknown"), "started_at": info.get("started_at")}
                 running_process = info["process"]
+                break
+        
+        # If no owner found but dashboard is running, check if any user in dashboard_owners
+        # (process object might be stale but dashboard still running)
+        if not running_owner:
+            for uid, info in dashboard_owners.items():
+                # Dashboard is running and user is in owners list - they likely own it
+                running_owner = {"user_id": uid, "username": info.get("username", "unknown"), "started_at": info.get("started_at")}
+                running_process = info.get("process")  # Might be None if stale
                 break
     
     # Debug logging
@@ -1408,7 +1755,8 @@ def _build_coins_message(page: int) -> tuple[str, Optional[InlineKeyboardMarkup]
         if page_buttons:
             keyboard_buttons.append(page_buttons)
     
-    # Back to main menu button
+    # Back to Data Queries and Back to Main Menu
+    keyboard_buttons.append([InlineKeyboardButton("🔙 Back to Data Queries", callback_data="menu_data")])
     keyboard_buttons.append([InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")])
     
     keyboard = InlineKeyboardMarkup(keyboard_buttons) if keyboard_buttons else None
@@ -1507,6 +1855,82 @@ async def coins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     except Exception as e:
         logger.error(f"Error listing coins: {e}")
         await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
+# In-memory cache for instant prices (coin_id -> {data, timestamp})
+_instant_price_cache: Dict[str, dict] = {}
+INSTANT_PRICE_CACHE_TTL = 60  # seconds
+
+
+def _fetch_instant_price(coin_id: str, symbol: str) -> Optional[Dict]:
+    """Fetch instant/real-time price from CoinGecko /simple/price endpoint.
+    
+    Returns dict with price, market_cap, change_24h, last_updated or None on failure.
+    Results are cached for INSTANT_PRICE_CACHE_TTL seconds.
+    """
+    global _instant_price_cache
+    
+    # Check cache first
+    now = time.time()
+    cache_key = coin_id
+    if cache_key in _instant_price_cache:
+        cached = _instant_price_cache[cache_key]
+        if now - cached["fetched_at"] < INSTANT_PRICE_CACHE_TTL:
+            logger.debug(f"Instant price cache hit for {symbol}")
+            return cached["data"]
+    
+    url = f"{COINGECKO_API_BASE}/simple/price"
+    params = {
+        "ids": coin_id,
+        "vs_currencies": VS_CURRENCY,
+        "include_market_cap": "true",
+        "include_24hr_change": "true",
+        "include_24hr_vol": "true",
+        "include_last_updated_at": "true",
+    }
+    
+    headers = {}
+    if COINGECKO_API_KEY:
+        headers["x-cg-pro-api-key"] = COINGECKO_API_KEY
+    
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            coin_data = data.get(coin_id, {})
+            if not coin_data:
+                return None
+            
+            result = {
+                "price": coin_data.get(f"{VS_CURRENCY}"),
+                "market_cap": coin_data.get(f"{VS_CURRENCY}_market_cap"),
+                "change_24h": coin_data.get(f"{VS_CURRENCY}_24h_change"),
+                "volume_24h": coin_data.get(f"{VS_CURRENCY}_24h_vol"),
+                "last_updated": coin_data.get("last_updated_at"),
+            }
+            
+            # Cache the result
+            _instant_price_cache[cache_key] = {
+                "data": result,
+                "fetched_at": now,
+            }
+            
+            return result
+        elif r.status_code == 429:
+            logger.warning("CoinGecko rate limit hit for instant price")
+            # Return cached data even if expired
+            if cache_key in _instant_price_cache:
+                return _instant_price_cache[cache_key]["data"]
+            return None
+        else:
+            logger.debug(f"Failed to fetch instant price for {coin_id}: HTTP {r.status_code}")
+            return None
+    except Exception as e:
+        logger.debug(f"Error fetching instant price for {coin_id}: {e}")
+        # Return cached data even if expired on error
+        if cache_key in _instant_price_cache:
+            return _instant_price_cache[cache_key]["data"]
+        return None
 
 
 def _fetch_coin_details(coin_id: str) -> Optional[Dict]:
@@ -1672,14 +2096,18 @@ def _check_dashboard_running() -> bool:
 
 @rate_limit(max_calls=15, period=60)
 async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /price command - get latest price for a coin."""
-    # Track user action
-    symbol = context.args[0].upper() if context.args and len(context.args) > 0 else "none"
+    """Handle /price command - get instant/real-time price for a coin.
+    
+    Fetches live data directly from CoinGecko API. No dashboard required.
+    Falls back to cached historical data if API call fails and dashboard is running.
+    """
+    # Track user action (use BTC as default when no symbol provided)
+    symbol = context.args[0].upper() if context.args and len(context.args) > 0 else "BTC"
     log_user_action(update, "command", f"/price {symbol}")
     
+    # Default to BTC if no symbol argument is provided
     if not context.args:
-        await update.message.reply_text("❌ Please specify a coin symbol. Example: /price BTC")
-        return
+        context.args = ["BTC"]
     
     symbol = context.args[0].upper()
     
@@ -1692,97 +2120,224 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
     
-    # Check if dashboard is running
-    if not _check_dashboard_running():
-        await update.message.reply_text(
-            "⚠️ *Dashboard is offline*\n\n"
-            "💡 The dashboard needs to be running to access data.\n"
-            "Use /run to start the dashboard first."
-        )
+    # Find coin_id for this symbol
+    coin_info = _find_coin_info(symbol)
+    if not coin_info:
+        await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
         return
-    loading_msg = None
+    
+    coin_id = coin_info[0]
     
     try:
-        # Load only this coin's data (much faster than loading all coins)
+        # Fetch instant price from CoinGecko API (no dashboard needed)
         loop = asyncio.get_event_loop()
-        mc_series, price_series, meta = await loop.run_in_executor(None, _load_single_coin_data, symbol)
+        instant_data = await loop.run_in_executor(None, _fetch_instant_price, coin_id, symbol)
         
-        if mc_series is None:
-            await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
-            return
-        
-        # Get latest market cap
-        latest_mc = mc_series.iloc[-1]
-        latest_date = mc_series.index[-1]
-        
-        latest_price = None
-        change_24h = None
-        change_emoji = ""
-        
-        if price_series is not None:
-            price_series = price_series.dropna()
-            if not price_series.empty:
-                latest_price = price_series.iloc[-1]
-                # Calculate 24h change if possible
-                if len(price_series) > 1:
-                    prev_price = price_series.iloc[-2]
-                    change_24h = ((latest_price - prev_price) / prev_price) * 100
-                    change_emoji = "📈" if change_24h >= 0 else "📉"
-        
-        # Format timestamp
-        timestamp_str = format_timestamp(latest_date)
-        
-        # If no price data, show market cap only
-        if latest_price is None:
-            price_text = (
-                f"💰 *{symbol} Price*\n\n"
-                f"Market Cap: ${latest_mc:,.0f}\n"
-                f"Date: {latest_date.strftime('%Y-%m-%d')}\n"
-                f"Price data not available\n"
-                f"Last updated: {timestamp_str}\n"
-            )
-        else:
-            price_text = (
-                f"💰 *{symbol} Price*\n\n"
-                f"Price: ${latest_price:,.2f}\n"
-                f"Market Cap: ${latest_mc:,.0f}\n"
-                f"Date: {latest_date.strftime('%Y-%m-%d')}\n"
-            )
+        if instant_data and instant_data.get("price") is not None:
+            # Build response from live data
+            price = instant_data["price"]
+            market_cap = instant_data.get("market_cap")
+            change_24h = instant_data.get("change_24h")
+            volume_24h = instant_data.get("volume_24h")
+            last_updated_ts = instant_data.get("last_updated")
+            
+            price_text = f"💰 *{symbol} Price*\n\n"
+            price_text += f"Price: ${price:,.2f}\n"
+            
+            if market_cap:
+                if market_cap >= 1e12:
+                    mc_str = f"${market_cap / 1e12:.2f}T"
+                elif market_cap >= 1e9:
+                    mc_str = f"${market_cap / 1e9:.2f}B"
+                elif market_cap >= 1e6:
+                    mc_str = f"${market_cap / 1e6:.2f}M"
+                else:
+                    mc_str = f"${market_cap:,.0f}"
+                price_text += f"Market Cap: {mc_str}\n"
+            
+            if volume_24h:
+                if volume_24h >= 1e9:
+                    vol_str = f"${volume_24h / 1e9:.2f}B"
+                elif volume_24h >= 1e6:
+                    vol_str = f"${volume_24h / 1e6:.2f}M"
+                else:
+                    vol_str = f"${volume_24h:,.0f}"
+                price_text += f"24h Volume: {vol_str}\n"
             
             if change_24h is not None:
+                change_emoji = "📈" if change_24h >= 0 else "📉"
                 price_text += f"{change_emoji} 24h Change: {change_24h:+.2f}%\n"
             
-            price_text += f"Last updated: {timestamp_str}\n"
+            # Format last updated timestamp
+            if last_updated_ts:
+                updated_dt = datetime.utcfromtimestamp(last_updated_ts)
+                price_text += f"\nLast updated: {updated_dt.strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
+            
+            await update.message.reply_text(price_text, parse_mode="Markdown")
+            return
         
-        # Delete loading message and send result
-        await safe_delete_loading_message(loading_msg)
-        await update.message.reply_text(price_text, parse_mode="Markdown")
+        # Fallback: try cached historical data if dashboard is running
+        if _check_dashboard_running():
+            mc_series, price_series, meta = await loop.run_in_executor(None, _load_single_coin_data, symbol)
+            
+            if mc_series is not None:
+                latest_mc = mc_series.iloc[-1]
+                latest_date = mc_series.index[-1]
+                latest_price = None
+                change_24h = None
+                
+                if price_series is not None:
+                    price_series = price_series.dropna()
+                    if not price_series.empty:
+                        latest_price = price_series.iloc[-1]
+                        if len(price_series) > 1:
+                            prev_price = price_series.iloc[-2]
+                            change_24h = ((latest_price - prev_price) / prev_price) * 100
+                
+                timestamp_str = format_timestamp(latest_date)
+                
+                price_text = f"💰 *{symbol} Price* _(cached)_\n\n"
+                if latest_price is not None:
+                    price_text += f"Price: ${latest_price:,.2f}\n"
+                price_text += f"Market Cap: ${latest_mc:,.0f}\n"
+                if change_24h is not None:
+                    change_emoji = "📈" if change_24h >= 0 else "📉"
+                    price_text += f"{change_emoji} 24h Change: {change_24h:+.2f}%\n"
+                price_text += f"\nLast updated: {timestamp_str}\n"
+                
+                await update.message.reply_text(price_text, parse_mode="Markdown")
+                return
+        
+        # Both instant and cached failed
+        await update.message.reply_text(
+            f"❌ Could not fetch price for {symbol}.\n\n"
+            "💡 CoinGecko API may be temporarily unavailable.\n"
+            "Please try again in a moment."
+        )
         
     except Exception as e:
         logger.error(f"Error getting price for {symbol}: {e}")
-        await safe_delete_loading_message(loading_msg)
         await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
+def _fetch_all_instant_prices() -> Optional[Dict]:
+    """Fetch instant prices for all coins from CoinGecko /simple/price endpoint.
+    
+    Returns dict of {symbol: {price, market_cap, change_24h}} or None.
+    """
+    from src.constants import COINS
+    
+    coin_ids = [cid for cid, _, _, _ in COINS]
+    ids_str = ",".join(coin_ids)
+    
+    url = f"{COINGECKO_API_BASE}/simple/price"
+    params = {
+        "ids": ids_str,
+        "vs_currencies": VS_CURRENCY,
+        "include_market_cap": "true",
+        "include_24hr_change": "true",
+        "include_last_updated_at": "true",
+    }
+    
+    headers = {}
+    if COINGECKO_API_KEY:
+        headers["x-cg-pro-api-key"] = COINGECKO_API_KEY
+    
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            result = {}
+            for cid, sym, _, _ in COINS:
+                coin_data = data.get(cid, {})
+                if coin_data and coin_data.get(VS_CURRENCY) is not None:
+                    result[sym] = {
+                        "price": coin_data.get(VS_CURRENCY),
+                        "market_cap": coin_data.get(f"{VS_CURRENCY}_market_cap"),
+                        "change_24h": coin_data.get(f"{VS_CURRENCY}_24h_change"),
+                        "last_updated": coin_data.get("last_updated_at"),
+                    }
+            return result
+        else:
+            logger.debug(f"Failed to fetch all instant prices: HTTP {r.status_code}")
+            return None
+    except Exception as e:
+        logger.debug(f"Error fetching all instant prices: {e}")
+        return None
 
 
 @rate_limit(max_calls=10, period=60)
 async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /latest command - get latest prices for all coins."""
+    """Handle /latest command - get latest prices for all coins.
+    
+    Uses instant CoinGecko data when available, falls back to cached data
+    if dashboard is running.
+    """
     # Track user action
     log_user_action(update, "command", "/latest")
-    
-    # Check if dashboard is running
-    if not _check_dashboard_running():
-        await update.message.reply_text(
-            "⚠️ *Dashboard is offline*\n\n"
-            "💡 The dashboard needs to be running to access data.\n"
-            "Use /run to start the dashboard first."
-        )
-        return
     
     loading_msg = None
     try:
         loading_msg = await create_loading_message(update)
         loop = asyncio.get_event_loop()
+        
+        # Try instant prices first (no dashboard needed)
+        instant_prices = await loop.run_in_executor(None, _fetch_all_instant_prices)
+        
+        if instant_prices:
+            # Sort by market cap descending
+            sorted_coins = sorted(
+                instant_prices.items(),
+                key=lambda x: x[1].get("market_cap") or 0,
+                reverse=True
+            )
+            
+            latest_text = "📊 *Latest Prices*\n\n"
+            
+            for sym, data in sorted_coins:
+                price = data["price"]
+                change = data.get("change_24h")
+                
+                line = f"{sym}: ${price:,.2f}"
+                if change is not None:
+                    emoji = "📈" if change >= 0 else "📉"
+                    line += f"  {emoji} {change:+.1f}%"
+                latest_text += line + "\n"
+            
+            # Timestamp from first coin's last_updated
+            first_ts = next(iter(instant_prices.values()), {}).get("last_updated")
+            if first_ts:
+                updated_dt = datetime.utcfromtimestamp(first_ts)
+                latest_text += f"\nLast updated: {updated_dt.strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
+            
+            # Send (split if needed)
+            await safe_delete_loading_message(loading_msg)
+            if len(latest_text) > BOT_MAX_MESSAGE_LENGTH:
+                # Split into chunks
+                lines = latest_text.split("\n")
+                header = lines[0] + "\n\n"
+                current_msg = header
+                for line in lines[2:]:
+                    if len(current_msg) + len(line) + 1 > BOT_MAX_MESSAGE_LENGTH:
+                        await update.message.reply_text(current_msg, parse_mode="Markdown")
+                        current_msg = line + "\n"
+                    else:
+                        current_msg += line + "\n"
+                if current_msg.strip():
+                    await update.message.reply_text(current_msg, parse_mode="Markdown")
+            else:
+                await update.message.reply_text(latest_text, parse_mode="Markdown")
+            return
+        
+        # Fallback: cached data from dashboard
+        if not _check_dashboard_running():
+            await safe_delete_loading_message(loading_msg)
+            await update.message.reply_text(
+                "❌ Could not fetch live prices.\n\n"
+                "💡 CoinGecko API may be temporarily unavailable.\n"
+                "Please try again in a moment."
+            )
+            return
         
         # Start progress update task
         progress_task = await update_loading_progress(loading_msg)
@@ -1794,14 +2349,15 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         progress_task.cancel()
         
         if dm.df_raw is None or dm.df_raw.empty:
+            await safe_delete_loading_message(loading_msg)
             await update.message.reply_text("❌ No data available. Try running the dashboard first.")
             return
         
-        latest_text = f"📊 *Latest Prices*\n"
+        latest_text = f"📊 *Latest Prices* _(cached)_\n"
         latest_date = dm.df_raw.index[-1]
         latest_text += f"Date: {latest_date.strftime('%Y-%m-%d')}\n\n"
         
-        # Show ALL coins (not just top 10)
+        # Show ALL coins
         from src.app.callbacks import _load_price_data
         prices_dict = _load_price_data()
         
@@ -1813,61 +2369,30 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 if not price_series.empty:
                     price = price_series.iloc[-1]
                     latest_text += f"{sym}: ${price:,.2f}\n"
-                else:
-                    # Fallback to market cap if no price
-                    if sym in dm.series:
-                        mc = dm.series[sym].iloc[-1]
-                        latest_text += f"{sym}: MC ${mc:,.0f}\n"
+                elif sym in dm.series:
+                    mc = dm.series[sym].iloc[-1]
+                    latest_text += f"{sym}: MC ${mc:,.0f}\n"
             elif sym in dm.series:
-                # Fallback to market cap if no price data
                 mc = dm.series[sym].iloc[-1]
                 latest_text += f"{sym}: MC ${mc:,.0f}\n"
         
-        # Add timestamp at the end
         latest_text += f"\nLast updated: {format_timestamp(latest_date)}\n"
         
-        # Check message length and split if needed
+        await safe_delete_loading_message(loading_msg)
+        
         if len(latest_text) > BOT_MAX_MESSAGE_LENGTH:
-            # Split into multiple messages
-            messages = []
-            latest_date = dm.df_raw.index[-1]
-            header = f"📊 *Latest Prices*\nDate: {latest_date.strftime('%Y-%m-%d')}\n\n"
+            lines = latest_text.split("\n")
+            header = lines[0] + "\n" + lines[1] + "\n\n"
             current_msg = header
-            
-            for sym in symbols_to_show:
-                line = ""
-                if sym in prices_dict:
-                    price_series = prices_dict[sym].dropna()
-                    if not price_series.empty:
-                        price = price_series.iloc[-1]
-                        line = f"{sym}: ${price:,.2f}\n"
-                    elif sym in dm.series:
-                        mc = dm.series[sym].iloc[-1]
-                        line = f"{sym}: MC ${mc:,.0f}\n"
-                elif sym in dm.series:
-                    mc = dm.series[sym].iloc[-1]
-                    line = f"{sym}: MC ${mc:,.0f}\n"
-                
-                if len(current_msg) + len(line) > BOT_MAX_MESSAGE_LENGTH:
-                    messages.append(current_msg)
-                    current_msg = line
+            for line in lines[3:]:
+                if len(current_msg) + len(line) + 1 > BOT_MAX_MESSAGE_LENGTH:
+                    await update.message.reply_text(current_msg, parse_mode="Markdown")
+                    current_msg = line + "\n"
                 else:
-                    current_msg += line
-            
-            if current_msg:
-                messages.append(current_msg)
-            
-            if loading_msg:
-                try:
-                    await loading_msg.delete()
-                except Exception:
-                    pass
-            
-            # Send all messages
-            for msg in messages:
-                await update.message.reply_text(msg, parse_mode="Markdown")
+                    current_msg += line + "\n"
+            if current_msg.strip():
+                await update.message.reply_text(current_msg, parse_mode="Markdown")
         else:
-            await safe_delete_loading_message(loading_msg)
             await update.message.reply_text(latest_text, parse_mode="Markdown")
         
     except Exception as e:
@@ -1879,13 +2404,13 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 @rate_limit(max_calls=15, period=60)
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /info command - get detailed information for a coin."""
-    # Track user action
-    symbol = context.args[0].upper() if context.args and len(context.args) > 0 else "none"
+    # Track user action (use BTC as default when no symbol provided)
+    symbol = context.args[0].upper() if context.args and len(context.args) > 0 else "BTC"
     log_user_action(update, "command", f"/info {symbol}")
     
+    # Default to BTC if no symbol argument is provided
     if not context.args:
-        await update.message.reply_text("❌ Please specify a coin symbol. Example: /info BTC")
-        return
+        context.args = ["BTC"]
     
     symbol = context.args[0].upper()
     
@@ -2046,6 +2571,774 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
+def _compute_timeframe_change(series: Optional[pd.Series], days: int) -> Optional[Dict]:
+    """Compute percentage and absolute change over a timeframe.
+
+    Uses the last value in the series as 'current' and compares it to the
+    value from approximately `days` ago (or earliest available if not enough data).
+    """
+    if series is None or series.empty:
+        return None
+
+    # Ensure series is sorted by index
+    series = series.sort_index()
+
+    end_value = series.iloc[-1]
+    end_date = series.index[-1]
+
+    if pd.isna(end_value):
+        return None
+
+    target_date = end_date - pd.Timedelta(days=days)
+
+    # Use the last value at or before target_date as the starting point
+    subset = series[series.index <= end_date]
+    if subset.empty:
+        return None
+
+    start_candidates = subset[subset.index <= target_date]
+    if not start_candidates.empty:
+        start_value = start_candidates.iloc[-1]
+        start_date = start_candidates.index[-1]
+    else:
+        # Not enough history; fall back to earliest available value
+        start_value = subset.iloc[0]
+        start_date = subset.index[0]
+
+    if pd.isna(start_value) or start_value == 0:
+        return None
+
+    abs_change = float(end_value - start_value)
+    pct_change = (abs_change / float(start_value)) * 100.0
+
+    # High/low within the period (from start_date to end_date)
+    period_series = series[(series.index >= start_date) & (series.index <= end_date)].dropna()
+    if period_series.empty:
+        high = low = float(end_value)
+    else:
+        high = float(period_series.max())
+        low = float(period_series.min())
+
+    return {
+        "start_value": float(start_value),
+        "end_value": float(end_value),
+        "abs_change": abs_change,
+        "pct_change": pct_change,
+        "start_date": start_date,
+        "end_date": end_date,
+        "high": high,
+        "low": low,
+    }
+
+
+@rate_limit(max_calls=10, period=60)
+async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /summary command - 1d, 1w, 1m, 1y summary for a coin."""
+    # Parse args - default to BTC when no symbol is provided
+    if not context.args:
+        context.args = ["BTC"]
+
+    symbol = context.args[0].upper()
+    timeframe_arg = context.args[1].lower() if len(context.args) > 1 else "all"
+
+    # Track user action
+    log_user_action(update, "command", f"/summary {symbol} {timeframe_arg}")
+
+    # Validate symbol format
+    if not validate_symbol(symbol):
+        await update.message.reply_text(
+            "❌ Invalid symbol format.\n\n"
+            "💡 Symbol must be 1-10 alphanumeric characters.\n"
+            "Example: BTC, ETH, DOGE"
+        )
+        return
+
+    # Validate timeframe
+    valid_timeframes = {"1d": 1, "1w": 7, "1m": 30, "1y": 365}
+    if timeframe_arg != "all" and timeframe_arg not in valid_timeframes:
+        await update.message.reply_text(
+            "❌ Invalid timeframe.\n\n"
+            "Supported timeframes: 1d, 1w, 1m, 1y, or omit to show all.\n"
+            "Examples:\n"
+            "/summary BTC\n"
+            "/summary BTC 1w"
+        )
+        return
+
+    # Require dashboard data (DataManager)
+    if not _check_dashboard_running():
+        await update.message.reply_text(
+            "⚠️ *Dashboard is offline*\n\n"
+            "💡 The dashboard needs to be running to access historical data.\n"
+            "Use /run to start the dashboard first."
+        )
+        return
+
+    loading_msg = None
+    try:
+        loading_msg = await create_loading_message(update)
+        loop = asyncio.get_event_loop()
+
+        # Load data manager in executor (non-blocking)
+        dm = await loop.run_in_executor(None, _load_data_manager)
+
+        if symbol not in dm.series:
+            await safe_delete_loading_message(loading_msg)
+            await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
+            return
+
+        mc_series = dm.series[symbol]
+        latest_mc = mc_series.iloc[-1]
+        latest_date = mc_series.index[-1]
+
+        # Load price data
+        from src.app.callbacks import _load_price_data
+
+        prices_dict = _load_price_data()
+        price_series = prices_dict.get(symbol)
+        if price_series is not None:
+            price_series = price_series.dropna().sort_index()
+
+        # Determine which timeframes to compute
+        if timeframe_arg == "all":
+            timeframes = valid_timeframes
+        else:
+            timeframes = {timeframe_arg: valid_timeframes[timeframe_arg]}
+
+        lines = [f"📊 *{symbol} Summary*"]
+        lines.append("")
+        lines.append(f"Latest Price/Market Cap as of {latest_date.strftime('%Y-%m-%d')}:")
+
+        # Latest price if available
+        latest_price = None
+        if price_series is not None and not price_series.empty:
+            latest_price = float(price_series.iloc[-1])
+            lines.append(f"Price: ${latest_price:,.2f}")
+        lines.append(f"Market Cap: ${latest_mc:,.0f}")
+        lines.append("")
+
+        # Per-timeframe stats
+        for tf_label, days in timeframes.items():
+            price_change = _compute_timeframe_change(price_series, days) if price_series is not None else None
+            mc_change = _compute_timeframe_change(mc_series, days)
+
+            # Skip timeframe if we have neither price nor MC change
+            if price_change is None and mc_change is None:
+                continue
+
+            pretty_label = {
+                "1d": "1 Day",
+                "1w": "1 Week",
+                "1m": "1 Month",
+                "1y": "1 Year",
+            }.get(tf_label, tf_label)
+
+            lines.append(f"⏱ *{pretty_label}*")
+
+            if price_change is not None:
+                pct = price_change["pct_change"]
+                abs_ch = price_change["abs_change"]
+                start_val = price_change["start_value"]
+                end_val = price_change["end_value"]
+                emoji = "📈" if pct >= 0 else "📉"
+                lines.append(
+                    f"{emoji} Price: {pct:+.2f}%  "
+                    f"(${abs_ch:+,.2f}, {price_change['start_date'].strftime('%Y-%m-%d')} → "
+                    f"{price_change['end_date'].strftime('%Y-%m-%d')})"
+                )
+                lines.append(
+                    f"   ${start_val:,.2f} → ${end_val:,.2f}"
+                )
+
+                # Only show high/low for 1y by default (to avoid clutter)
+                if tf_label == "1y":
+                    lines.append(
+                        f"   Low (1y): ${price_change['low']:,.2f}  |  "
+                        f"High (1y): ${price_change['high']:,.2f}"
+                    )
+
+            if mc_change is not None:
+                pct = mc_change["pct_change"]
+                abs_ch = mc_change["abs_change"]
+                start_val = mc_change["start_value"]
+                end_val = mc_change["end_value"]
+                emoji = "📈" if pct >= 0 else "📉"
+                lines.append(
+                    f"{emoji} Market Cap: {pct:+.2f}%  "
+                    f"(${abs_ch:+,.0f}, {mc_change['start_date'].strftime('%Y-%m-%d')} → "
+                    f"{mc_change['end_date'].strftime('%Y-%m-%d')})"
+                )
+                # Format market cap nicely (B/M/K)
+                if start_val >= 1e12:
+                    start_str = f"${start_val / 1e12:.2f}T"
+                elif start_val >= 1e9:
+                    start_str = f"${start_val / 1e9:.2f}B"
+                elif start_val >= 1e6:
+                    start_str = f"${start_val / 1e6:.2f}M"
+                else:
+                    start_str = f"${start_val:,.0f}"
+                
+                if end_val >= 1e12:
+                    end_str = f"${end_val / 1e12:.2f}T"
+                elif end_val >= 1e9:
+                    end_str = f"${end_val / 1e9:.2f}B"
+                elif end_val >= 1e6:
+                    end_str = f"${end_val / 1e6:.2f}M"
+                else:
+                    end_str = f"${end_val:,.0f}"
+                
+                lines.append(
+                    f"   {start_str} → {end_str}"
+                )
+
+            lines.append("")
+
+        # If nothing was added (very short history)
+        if len(lines) <= 4:
+            lines.append("⚠️ Not enough historical data to compute summaries for this coin.")
+
+        # Add timestamp at the end
+        lines.append(f"Last updated: {format_timestamp(latest_date)}")
+
+        await safe_delete_loading_message(loading_msg)
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    except Exception as e:
+        logger.error(f"Error getting summary for {symbol}: {e}")
+        await safe_delete_loading_message(loading_msg)
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
+def _fetch_hourly_price_data(coin_id: str, days: int) -> Optional[pd.Series]:
+    """Fetch hourly price data from CoinGecko API for chart generation.
+    
+    CoinGecko returns hourly data automatically when days <= 90.
+    
+    Args:
+        coin_id: CoinGecko coin ID
+        days: Number of days to fetch (7 for 1w, 30 for 1m)
+    
+    Returns:
+        Price Series with hourly data (datetime index) or None on error
+    """
+    url = f"{COINGECKO_API_BASE}/coins/{coin_id}/market_chart"
+    params = {
+        "vs_currency": VS_CURRENCY,
+        "days": days,
+        # No interval parameter - CoinGecko auto-returns hourly for days <= 90
+    }
+    
+    headers = {}
+    if COINGECKO_API_KEY:
+        headers["x-cg-pro-api-key"] = COINGECKO_API_KEY
+    
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            prices = data.get("prices", [])
+            
+            if not prices:
+                return None
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(prices, columns=["ts", "price"])
+            df["date"] = pd.to_datetime(df["ts"], unit="ms")
+            df = df.sort_values("date")
+            
+            # Set datetime index and return price series
+            # Ensure price column is float64 to preserve precision for small values
+            df["price"] = df["price"].astype("float64")
+            price_series = df.set_index("date")["price"].sort_index()
+            return price_series
+        else:
+            logger.debug(f"Failed to fetch hourly data for {coin_id}: HTTP {r.status_code}")
+            return None
+    except Exception as e:
+        logger.debug(f"Error fetching hourly data for {coin_id}: {e}")
+        return None
+
+
+def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, timeframe: str, days: int) -> Optional[Path]:
+    """Generate a chart image with dual Y-axes (price on left, indexed on right), both logarithmic.
+    
+    Uses best resolution available:
+    - 1w/1m: Fetches hourly data from CoinGecko (uses hourly data directly)
+    - 1y: Uses daily data from DataManager
+    
+    Args:
+        symbol: Coin symbol
+        coin_id: CoinGecko coin ID (for fetching hourly data)
+        price_series: Daily price series with date index (fallback for 1y)
+        timeframe: Label for timeframe ("1w", "1m", "1y")
+        days: Number of days to show
+    
+    Returns:
+        Path to generated PNG file or None on error
+    """
+    try:
+        # For 1w and 1m, fetch hourly data and use it directly
+        if timeframe in ("1w", "1m"):
+            hourly_data = _fetch_hourly_price_data(coin_id, days)
+            if hourly_data is None or hourly_data.empty:
+                logger.warning(f"Could not fetch hourly data for {symbol}, falling back to daily")
+                # Fall back to daily data
+                timeframe_data = price_series.sort_index().dropna()
+            else:
+                # Use hourly data directly (no resampling)
+                timeframe_data = hourly_data.sort_index().dropna()
+        else:
+            # For 1y, use daily data
+            if price_series.empty:
+                return None
+            
+            price_series = price_series.sort_index().dropna()
+            if price_series.empty:
+                return None
+            
+            end_date = price_series.index[-1]
+            start_date = end_date - pd.Timedelta(days=days)
+            
+            # Filter to timeframe
+            timeframe_data = price_series[price_series.index >= start_date].dropna()
+        
+        if timeframe_data.empty or len(timeframe_data) < 2:
+            return None
+        
+        # Ensure data is float64 to preserve precision for small values
+        timeframe_data = timeframe_data.astype("float64")
+        
+        # Filter out any zero or negative values (data quality check)
+        timeframe_data = timeframe_data[timeframe_data > 0]
+        if timeframe_data.empty or len(timeframe_data) < 2:
+            logger.warning(f"No valid positive price data for {symbol}")
+            return None
+        
+        # Calculate indexed price (normalized to start at 100)
+        first_price = timeframe_data.iloc[0]
+        indexed_price = (timeframe_data / first_price) * 100
+        
+        # Determine appropriate decimal precision based on price range
+        max_price = timeframe_data.max()
+        min_price = timeframe_data.min()
+        
+        # Log price range for debugging
+        logger.debug(f"Chart for {symbol}: min=${min_price:.8f}, max=${max_price:.8f}, count={len(timeframe_data)}")
+        
+        # Verify we have valid data (not all zeros)
+        if timeframe_data.sum() == 0 or all(v == 0 for v in timeframe_data.values):
+            logger.error(f"All price values are zero for {symbol} - cannot generate chart")
+            return None
+        
+        # Determine tick format and hover precision based on price magnitude
+        if max_price < 0.01:
+            # Very small prices (< $0.01): use 6 decimal places
+            tick_format = '$,.6f'
+            hover_precision = 6
+        elif max_price < 0.1:
+            # Small prices (< $0.1): use 4 decimal places
+            tick_format = '$,.4f'
+            hover_precision = 4
+        elif max_price < 1:
+            # Prices < $1: use 3 decimal places
+            tick_format = '$,.3f'
+            hover_precision = 3
+        elif max_price < 1000:
+            # Prices < $1000: use 2 decimal places
+            tick_format = '$,.2f'
+            hover_precision = 2
+        else:
+            # Large prices: use 0 decimal places (whole dollars)
+            tick_format = '$,.0f'
+            hover_precision = 2  # Still show 2 decimals in hover
+        
+        # Create figure with dual Y-axes
+        fig = go.Figure()
+        
+        # Determine date format based on timeframe
+        # For 1w/1m (hourly), show date and time; for 1y (daily), show date only
+        if timeframe in ("1w", "1m"):
+            date_format = '%Y-%m-%d %H:%M'
+            xaxis_title = 'Date & Time'
+        else:
+            date_format = '%Y-%m-%d'
+            xaxis_title = 'Date'
+        
+        # Add price trace (left Y-axis)
+        # Ensure values are float64 and not rounded
+        price_values = timeframe_data.values.astype("float64")
+        
+        fig.add_trace(go.Scatter(
+            x=timeframe_data.index,
+            y=price_values,  # Use explicitly typed values
+            mode='lines',
+            name=f'{symbol} Price',
+            line=dict(width=2, color='#1f77b4'),
+            yaxis='y',
+            hovertemplate=f'<b>%{{fullData.name}}</b><br>' +
+                         f'Date: %{{x|{date_format}}}<br>' +
+                         f'Price: $%{{y:,.{hover_precision}f}}<extra></extra>'
+        ))
+        
+        # Add indexed price trace (right Y-axis)
+        fig.add_trace(go.Scatter(
+            x=indexed_price.index,
+            y=indexed_price.values,
+            mode='lines',
+            name=f'{symbol} Index',
+            line=dict(width=2, color='#ff7f0e', dash='dash'),
+            yaxis='y2',
+            hovertemplate=f'<b>%{{fullData.name}}</b><br>' +
+                         f'Date: %{{x|{date_format}}}<br>' +
+                         'Index: %{y:.2f}<extra></extra>'
+        ))
+        
+        # Format timeframe label
+        timeframe_labels = {
+            "1w": "1 Week",
+            "1m": "1 Month",
+            "1y": "1 Year"
+        }
+        timeframe_label = timeframe_labels.get(timeframe, timeframe)
+        
+        # Update layout with dual Y-axes (both logarithmic)
+        fig.update_layout(
+            title=dict(
+                text=f'{symbol} Price & Index - Last {timeframe_label}',
+                font=dict(size=16)
+            ),
+            xaxis=dict(
+                title=xaxis_title,
+                type='date',
+                showgrid=True,
+                gridcolor='rgba(128,128,128,0.2)'
+            ),
+            yaxis=dict(
+                title='Price (USD)',
+                type='log',
+                side='left',
+                showgrid=True,
+                gridcolor='rgba(128,128,128,0.2)',
+                tickformat=tick_format,
+                # For very small values, use exponent format which works better with log scales
+                exponentformat='power' if max_price < 0.01 else 'none'
+            ),
+            yaxis2=dict(
+                title='Index (100 = start)',
+                type='log',
+                side='right',
+                overlaying='y',
+                showgrid=False,
+                tickformat='.1f'
+            ),
+            hovermode='x unified',
+            template='plotly_white',
+            width=1200,
+            height=600,
+            margin=dict(l=80, r=80, t=60, b=60),
+            legend=dict(
+                x=0.02,
+                y=0.98,
+                bgcolor='rgba(255,255,255,0.8)',
+                bordercolor='rgba(0,0,0,0.2)',
+                borderwidth=1
+            )
+        )
+        
+        # Create charts directory if it doesn't exist
+        charts_dir = PROJECT_ROOT / "charts"
+        charts_dir.mkdir(exist_ok=True)
+        
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        chart_filename = f"{symbol}_{timeframe}_{timestamp}.png"
+        chart_path = charts_dir / chart_filename
+        
+        # Export to PNG (kaleido is default engine)
+        try:
+            fig.write_image(str(chart_path), width=1200, height=600, scale=2)
+            logger.debug(f"Chart saved to {chart_path}")
+            return chart_path
+        except Exception as e:
+            logger.error(f"Failed to export chart image: {e}")
+            # Check if kaleido is installed
+            try:
+                import kaleido
+                logger.debug("kaleido is installed but export failed")
+            except ImportError:
+                logger.error("kaleido not installed. Install with: pip install kaleido")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error generating chart for {symbol}: {e}")
+        return None
+
+
+def _compute_and_export_correlation(symbol_a: str, symbol_b: str) -> Tuple[str, Optional[Path]]:
+    """Compute correlation for two symbols and export scatter plot to PNG. Returns (message_text, image_path or None)."""
+    from src.app.callbacks import compute_correlation_for_bot
+    dm = _load_data_manager()
+    if dm.df_raw is None or dm.df_raw.empty:
+        return "No market cap data loaded. Use /run to start the dashboard, then try again.", None
+    corr_text, fig = compute_correlation_for_bot(dm.df_raw, symbol_a, symbol_b)
+    # Check for error responses (dashboard returns these as text)
+    if corr_text.startswith("Select exactly") or corr_text.startswith("Not enough") or corr_text.startswith("Cannot") or corr_text.startswith("No market cap"):
+        return corr_text, None
+    charts_dir = PROJECT_ROOT / "charts"
+    charts_dir.mkdir(exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    chart_filename = f"corr_{symbol_a}_{symbol_b}_{timestamp}.png"
+    chart_path = charts_dir / chart_filename
+    try:
+        fig.write_image(str(chart_path), width=900, height=600, scale=2)
+        return corr_text, chart_path
+    except Exception as e:
+        logger.error(f"Failed to export correlation image: {e}")
+        return corr_text, None
+
+
+@rate_limit(max_calls=10, period=60)
+async def corr_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /corr command - correlation between two coins (default: BTC and ETH). Full output as main program + chart image."""
+    # Default: BTC and ETH
+    if not context.args or len(context.args) < 2:
+        context.args = ["BTC", "ETH"]
+    symbol_a = context.args[0].upper()
+    symbol_b = context.args[1].upper()
+    log_user_action(update, "command", f"/corr {symbol_a} {symbol_b}")
+    if not validate_symbol(symbol_a) or not validate_symbol(symbol_b):
+        await update.message.reply_text(
+            "❌ Invalid symbol format. Use 1–10 alphanumeric characters.\nExample: /corr BTC ETH"
+        )
+        return
+    if not _check_dashboard_running():
+        await update.message.reply_text(
+            "⚠️ *Dashboard is offline*\n\nCorrelation uses dashboard market cap data. Use /run to start it first.",
+            parse_mode="Markdown"
+        )
+        return
+    loading_msg = None
+    try:
+        loading_msg = await create_loading_message(update)
+        loop = asyncio.get_event_loop()
+        corr_text, chart_path = await loop.run_in_executor(
+            None, _compute_and_export_correlation, symbol_a, symbol_b
+        )
+        await safe_delete_loading_message(loading_msg)
+        if chart_path and chart_path.exists():
+            caption = (
+                f"📊 Correlation: {symbol_a} vs {symbol_b}\n\n"
+                f"{corr_text}"
+            )
+            with open(chart_path, "rb") as photo:
+                await update.message.reply_photo(
+                    photo=photo,
+                    caption=caption[:1024] if len(caption) > 1024 else caption,
+                )
+        else:
+            await update.message.reply_text(f"📊 Correlation\n\n{corr_text}")
+    except Exception as e:
+        logger.error(f"Error in correlation for {symbol_a} vs {symbol_b}: {e}")
+        await safe_delete_loading_message(loading_msg)
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
+@rate_limit(max_calls=10, period=60)
+async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /chart command - generate and send chart image with dual Y-axes (price + indexed)."""
+    # Parse args - default to BTC and 1y when no arguments provided
+    if not context.args:
+        context.args = ["BTC"]
+    
+    symbol = context.args[0].upper()
+    timeframe_arg = context.args[1].lower() if len(context.args) > 1 else "1y"
+    
+    # Track user action
+    log_user_action(update, "command", f"/chart {symbol} {timeframe_arg}")
+    
+    # Validate symbol format
+    if not validate_symbol(symbol):
+        await update.message.reply_text(
+            "❌ Invalid symbol format.\n\n"
+            "💡 Symbol must be 1-10 alphanumeric characters.\n"
+            "Example: BTC, ETH, DOGE"
+        )
+        return
+    
+    # Validate timeframe
+    valid_timeframes = {"1w": 7, "1m": 30, "1y": 365}
+    if timeframe_arg not in valid_timeframes:
+        await update.message.reply_text(
+            "❌ Invalid timeframe.\n\n"
+            "Supported timeframes: 1w, 1m, 1y\n"
+            "Examples:\n"
+            "/chart BTC\n"
+            "/chart BTC 1w\n"
+            "/chart ETH 1m"
+        )
+        return
+    
+    days = valid_timeframes[timeframe_arg]
+    
+    # Require dashboard data
+    if not _check_dashboard_running():
+        await update.message.reply_text(
+            "⚠️ *Dashboard is offline*\n\n"
+            "💡 The dashboard needs to be running to access historical data.\n"
+            "Use /run to start the dashboard first."
+        )
+        return
+    
+    loading_msg = None
+    try:
+        loading_msg = await create_loading_message(update)
+        loop = asyncio.get_event_loop()
+        
+        # Load data manager
+        dm = await loop.run_in_executor(None, _load_data_manager)
+        
+        if symbol not in dm.series:
+            await safe_delete_loading_message(loading_msg)
+            await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
+            return
+        
+        # Get coin_id for fetching hourly data
+        coin_info = _find_coin_info(symbol)
+        if not coin_info:
+            await safe_delete_loading_message(loading_msg)
+            await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")
+            return
+        
+        coin_id = coin_info[0]
+        
+        # Load price data (used as fallback for 1y or if hourly fetch fails)
+        from src.app.callbacks import _load_price_data
+        
+        prices_dict = _load_price_data()
+        price_series = prices_dict.get(symbol)
+        
+        if price_series is None or price_series.empty:
+            await safe_delete_loading_message(loading_msg)
+            await update.message.reply_text(
+                f"❌ No price data available for {symbol}.\n\n"
+                "💡 Price data may not be loaded yet. Try again after dashboard finishes loading."
+            )
+            return
+        
+        price_series = price_series.dropna().sort_index()
+        
+        # Generate chart image
+        await loading_msg.edit_text("🔄 Generating chart...\n⏳ Creating image...")
+        
+        chart_path = await loop.run_in_executor(
+            None, 
+            _generate_chart_image, 
+            symbol,
+            coin_id,
+            price_series, 
+            timeframe_arg, 
+            days
+        )
+        
+        if chart_path is None or not chart_path.exists():
+            await safe_delete_loading_message(loading_msg)
+            await update.message.reply_text(
+                f"❌ Failed to generate chart for {symbol}.\n\n"
+                "💡 Make sure kaleido is installed: pip install kaleido"
+            )
+            return
+        
+        # Build caption
+        timeframe_labels = {"1w": "1 Week", "1m": "1 Month", "1y": "1 Year"}
+        timeframe_label = timeframe_labels.get(timeframe_arg, timeframe_arg)
+        
+        latest_price = price_series.iloc[-1]
+        latest_date = price_series.index[-1]
+        
+        # Calculate date range
+        end_date = price_series.index[-1]
+        start_date = end_date - pd.Timedelta(days=days)
+        timeframe_data = price_series[price_series.index >= start_date].dropna()
+        
+        # Date format for caption
+        if timeframe_arg in ("1w", "1m"):
+            date_format = '%Y-%m-%d %H:%M'
+            resolution_note = " (hourly data)"
+        else:
+            date_format = '%Y-%m-%d'
+            resolution_note = ""
+        
+        if not timeframe_data.empty:
+            first_price = timeframe_data.iloc[0]
+            first_date = timeframe_data.index[0]
+            high_price = timeframe_data.max()
+            low_price = timeframe_data.min()
+            
+            # Determine appropriate decimal precision for caption based on price range
+            max_price_caption = max(high_price, latest_price, abs(first_price))
+            if max_price_caption < 0.01:
+                price_format = ',.6f'  # 6 decimal places for very small prices
+            elif max_price_caption < 0.1:
+                price_format = ',.4f'  # 4 decimal places for small prices
+            elif max_price_caption < 1:
+                price_format = ',.3f'  # 3 decimal places for prices < $1
+            elif max_price_caption < 1000:
+                price_format = ',.2f'  # 2 decimal places for normal prices
+            else:
+                price_format = ',.2f'  # 2 decimal places for large prices (still show cents)
+            
+            caption = (
+                f"📈 *{symbol} Price & Index - Last {timeframe_label}{resolution_note}*\n\n"
+                f"📅 {first_date.strftime(date_format)} → {latest_date.strftime(date_format)}\n\n"
+                f"💵 Current Price: ${latest_price:{price_format}}\n"
+                f"📊 High: ${high_price:{price_format}}  |  Low: ${low_price:{price_format}}\n\n"
+                f"📈 Left axis: Price (USD, log scale)\n"
+                f"📊 Right axis: Index (100 = start, log scale)\n\n"
+                f"Last updated: {format_timestamp(latest_date)}"
+            )
+        else:
+            caption = (
+                f"📈 *{symbol} Price & Index - Last {timeframe_label}*\n\n"
+                f"Last updated: {format_timestamp(latest_date)}"
+            )
+        
+        # Create keyboard with timeframe options
+        keyboard_buttons = []
+        timeframe_row = []
+        for tf in ["1w", "1m", "1y"]:
+            if tf != timeframe_arg:
+                timeframe_row.append(InlineKeyboardButton(
+                    tf.upper(), 
+                    callback_data=f"chart_{symbol}_{tf}"
+                ))
+        if timeframe_row:
+            keyboard_buttons.append(timeframe_row)
+        keyboard_buttons.append([InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")])
+        keyboard = InlineKeyboardMarkup(keyboard_buttons) if keyboard_buttons else None
+        
+        # Send chart image
+        await safe_delete_loading_message(loading_msg)
+        
+        with open(chart_path, 'rb') as photo:
+            await update.message.reply_photo(
+                photo=photo,
+                caption=caption,
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+        
+        # Clean up chart file
+        try:
+            chart_path.unlink()
+        except Exception as e:
+            logger.debug(f"Could not delete chart file: {e}")
+        
+    except Exception as e:
+        logger.error(f"Error generating chart for {symbol}: {e}")
+        await safe_delete_loading_message(loading_msg)
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle unknown commands."""
     # Track user action
@@ -2182,10 +3475,13 @@ async def main_async() -> None:
             BotCommand("stop", "Stop the dashboard server"),
             BotCommand("restart", "Restart the dashboard server"),
             BotCommand("status", "Check if dashboard is running"),
-            BotCommand("price", "Get latest price for a coin (e.g., /price BTC)"),
+            BotCommand("price", "Instant live price for a coin (e.g., /price BTC)"),
             BotCommand("coins", "List all available coins"),
-            BotCommand("latest", "Get latest prices for all coins"),
+            BotCommand("latest", "Live prices for all coins"),
             BotCommand("info", "Get detailed information for a coin (e.g., /info BTC)"),
+            BotCommand("summary", "1d/1w/1m/1y price & market cap summary"),
+            BotCommand("chart", "Price & index chart (1w/1m/1y, e.g., /chart BTC 1m)"),
+            BotCommand("corr", "Correlation between two coins (default: BTC ETH)"),
         ]
         await application.bot.set_my_commands(commands)
         logger.info("Bot commands registered successfully")
@@ -2223,6 +3519,9 @@ async def main_async() -> None:
     application.add_handler(CommandHandler("coins", coins_command))
     application.add_handler(CommandHandler("latest", latest_command))
     application.add_handler(CommandHandler("info", info_command))
+    application.add_handler(CommandHandler("summary", summary_command))
+    application.add_handler(CommandHandler("chart", chart_command))
+    application.add_handler(CommandHandler("corr", corr_command))
     
     # Unknown command handler (must be last to catch unhandled commands)
     # This catches any command that starts with / but isn't handled above

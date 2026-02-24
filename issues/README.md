@@ -22,16 +22,16 @@ This directory contains issue templates for problems found during code review.
 10. **010-bare-except-clauses.md** - Code Quality: Bare except clauses (Medium priority)
 11. **011-missing-type-hints.md** - Code Quality: Missing type hints (Low priority)
 12. **012-no-rate-limiting.md** - Enhancement: Rate limiting (Medium priority)
-13. **013-correlation-numerical.md** - Feature: Correlation between 2 coins (numerical)
-14. **014-correlation-chart.md** - Feature: Correlation between 2 coins (with chart image)
-15. **015-instant-price.md** - Feature: Instant price of coins
-16. **016-1year-chart-image.md** - Feature: 1 year chart image of coins
-17. **017-timeframe-summary.md** - Feature: 1d, 1w, 1m and 1y summary for coins
+13. **013-correlation-numerical.md** - Feature: Correlation between 2 coins (numerical) ✅ Fixed
+14. **014-correlation-chart.md** - Feature: Correlation between 2 coins (with chart image) ✅ Fixed
+15. **015-instant-price.md** - Feature: Instant price of coins ✅ Fixed
+16. **016-1year-chart-image.md** - Feature: 1 year chart image of coins ✅ Fixed
+17. **017-timeframe-summary.md** - Feature: 1d, 1w, 1m and 1y summary for coins ✅ Fixed
 18. **018-telegram-command-bar.md** - Enhancement: Show command bar in Telegram using "/" button (High priority)
-19. **019-enhance-info-command.md** - Enhancement: Show full coin details in /info command (High priority)
-20. **020-bot-bio-and-about-button.md** - Enhancement: Add bot bio information and "What's this bot for?" button (Medium priority)
-21. **021-fix-about-button-behavior.md** - Bug: Fix "What's this bot for?" button behavior (Medium priority)
-22. **022-add-about-to-command-bar.md** - Enhancement: Add "What's this bot for?" to Telegram command bar (Low priority)
+19. **019-enhance-info-command.md** - Enhancement: Show full coin details in /info command (High priority) ✅ Fixed
+20. **020-bot-bio-and-about-button.md** - Enhancement: Add bot bio information and "What's this bot for?" button (Medium priority) ✅ Fixed
+21. **021-fix-about-button-behavior.md** - Bug: Fix "What's this bot for?" button behavior (Medium priority) ✅ Fixed
+22. **022-add-about-to-command-bar.md** - Enhancement: Add "What's this bot for?" to Telegram command bar (Low priority) ✅ Fixed
 23. **023-help-menu-simplify-buttons.md** - Bug: Help menu should only show 2 buttons (Medium priority) ✅ Fixed
 24. **024-about-button-edit-message.md** - Bug: About button should edit message, not send new (Medium priority) ✅ Fixed
 25. **025-about-screen-single-button.md** - Bug: About screen should only show back button (Medium priority) ✅ Fixed
@@ -42,12 +42,12 @@ This directory contains issue templates for problems found during code review.
 30. **030-remove-category-from-data-displays.md** - Enhancement: Remove category from data displays - only show in /info (Low priority) ✅ Fixed
 31. **031-add-timestamp-latest-update.md** - Enhancement: Add timestamp for latest update in relevant sections (Medium priority) ✅ Fixed
 32. **032-remove-marketcap-command-completely.md** - Enhancement: Remove marketcap command and functions completely (Low priority) ✅ Fixed
-
-## Status Summary
-
-- **Total Issues**: 32
-- **Closed/Implemented**: 25 (Issues #1-12, #18-32)
-- **Open/Planned**: 7 (Issues #13-17)
+33. **033-add-chart-summary-buttons-data-queries.md** - Enhancement: Add Chart and Summary buttons to Data Queries menu (Medium priority)
+34. **034-default-single-coin-actions-to-btc.md** - Enhancement: Default all single-coin actions to BTC instead of ETH (Medium priority)
+35. **035-remove-eth-price-info-buttons.md** - Enhancement: Remove ETH-specific Price and Info buttons from menus (Medium priority)
+36. **036-section-navigation-flow-description.md** - Enhancement: Add section navigation flow - show description before data (Medium priority)
+37. **037-coins-list-back-to-data-queries.md** - Enhancement: Add "Back to Data Queries" button when viewing List All Coins (Medium priority) ✅ Fixed
+38. **038-data-queries-buttons-resend-menu-message.md** - Enhancement: Resend Data Queries menu as latest message when selecting Data Queries buttons (Medium priority) ✅ Fixed
 
 ## Priority Guide
 

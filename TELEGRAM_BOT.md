@@ -25,14 +25,15 @@ A comprehensive Telegram bot for controlling your Crypto Market Dashboard remote
 
 ### Data Queries
 - **Price Lookup**: Get latest price for any supported coin
-- **Coin List**: View all available cryptocurrencies with pagination
+- **Correlation**: Correlation analysis between two coins (default BTC/ETH)—same logic as dashboard: returns correlation, beta, positive/negative days, and scatter chart image; choose coins via command or buttons
+- **Market Cap**: Query market capitalization data
+- **Coin List**: View all available cryptocurrencies (with pagination)
 - **Latest Prices**: Get latest prices for all coins
 - **Detailed Info**: Comprehensive coin information (supply, performance, data range)
 
 ### Interactive Interface
 - **Inline Keyboards**: Navigate commands with interactive buttons
-- **Quick Actions**: Fast access to popular coins (BTC, ETH, etc.)
-- **Menu Navigation**: Organized command menus
+- **Menu Navigation**: Organized command menus (Dashboard Control, Data Queries, Help)
 - **Smart Message Management**: Button messages automatically cleaned up to avoid chat clutter
 
 ### User Management
@@ -152,11 +153,13 @@ Or manually via BotFather:
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `/price <SYMBOL>` | Get latest price | `/price BTC` |
+| `/price <SYMBOL>` | **Instant live price** from CoinGecko (no dashboard needed) | `/price BTC` |
 | `/coins` | List all available coins | `/coins` |
-| `/latest` | Latest prices for all coins | `/latest` |
-| `/info <SYMBOL>` | Detailed coin info | `/info DOGE` |
-| `/about` | Learn what this bot does | `/about` |
+| `/latest` | **Live prices for all coins** | `/latest` |
+| `/info <SYMBOL>` | Detailed coin info using dashboard history | `/info DOGE` |
+| `/summary <SYMBOL> [1d\|1w\|1m\|1y]` | 1d/1w/1m/1y price & market cap summary | `/summary BTC`, `/summary ETH 1m` |
+| `/chart <SYMBOL> [1w\|1m\|1y]` | Price & index chart image (dual Y-axis, logarithmic) | `/chart BTC`, `/chart ETH 1w`, `/chart DOGE 1m` |
+| `/corr [COIN1] [COIN2]` | Correlation between two coins (default: BTC ETH). Full analysis + scatter chart. Requires dashboard. | `/corr`, `/corr BTC ETH`, `/corr DOGE LINK` |
 
 ### Navigation
 
@@ -179,16 +182,107 @@ Bot: 🔄 Starting dashboard...
      🌐 Network: http://192.168.1.100:8052/
 ```
 
-### Querying Prices
+### Querying Instant Prices
 
 ```
 User: /price BTC
 Bot: 💰 BTC Price
-     💵 Price: $43,250.00
-     💎 Market Cap: $850,234,567,890
-     📅 Date: 2026-01-01
+     Price: $43,250.00
+     Market Cap: $850.23B
+     24h Volume: $35.10B
      📈 24h Change: +2.45%
+     
+     Last updated: 2026-01-01 12:34:56 UTC
 ```
+
+### Timeframe Summary (1d, 1w, 1m, 1y)
+
+```
+User: /summary BTC
+Bot: 📊 BTC Summary
+
+     Latest Price/Market Cap as of 2026-02-09:
+     Price: $70,000.00
+     Market Cap: $1.39T
+
+     ⏱ 1 Month
+     📉 Price: -23.62%  ($-21,378.17, 2026-01-10 → 2026-02-09)
+        $91,378.17 → $70,000.00
+     📉 Market Cap: -23.37%  ($-422,433,874,365, 2026-01-10 → 2026-02-09)
+        $1.81T → $1.39T
+
+     ⏱ 1 Year
+     📈 Price: +89.67%  ($+32,000.00, 2025-02-09 → 2026-02-09)
+        $38,000.00 → $70,000.00
+        Low (1y): $28,500.00  |  High (1y): $48,900.00
+     📈 Market Cap: +92.10%  ($+667,000,000,000, 2025-02-09 → 2026-02-09)
+        $0.72T → $1.39T
+
+     Last updated: 2026-02-09 12:34:56
+```
+
+### Price & Index Chart Image
+
+Generate and receive chart images showing price and indexed price with dual Y-axes (both logarithmic):
+
+```
+User: /chart BTC 1w
+Bot: [Sends chart image]
+
+📈 BTC Price & Index - Last 1 Week (hourly data)
+
+📅 2026-02-02 12:00 → 2026-02-09 12:00
+
+💵 Current Price: $70,000.00
+📊 High: $72,500.00  |  Low: $68,200.00
+
+📈 Left axis: Price (USD, log scale)
+📊 Right axis: Index (100 = start, log scale)
+
+Last updated: 2026-02-09 12:34:56
+```
+
+**Features:**
+- **Timeframes**: 1w (1 week), 1m (1 month), 1y (1 year)
+- **Data Resolution**:
+  - 1w/1m: Hourly data points (fetched from CoinGecko API)
+  - 1y: Daily data points (from cached dashboard data)
+- **Dual Y-Axes**: 
+  - Left: Price in USD (logarithmic scale)
+  - Right: Indexed price (normalized to 100 at start, logarithmic scale)
+- **Smart Formatting**: Automatically adjusts decimal precision for low-priced coins
+- **Interactive Buttons**: Switch between 1w/1m/1y timeframes directly from the chart
+
+**Examples:**
+- `/chart BTC` - 1 year chart (default)
+- `/chart BTC 1w` - 1 week chart with hourly data
+- `/chart ETH 1m` - 1 month chart with hourly data
+- `/chart DOGE 1y` - 1 year chart with daily data
+
+**Note**: Requires dashboard to be running for historical data access. Chart images are temporarily stored and automatically cleaned up.
+
+### Correlation (Two Coins)
+
+Get the same correlation analysis as the dashboard: overall correlation, beta, positive/negative day splits, and a scatter plot image.
+
+**By command:**
+```
+User: /corr
+Bot: [Sends correlation text + scatter chart image for BTC vs ETH]
+
+User: /corr DOGE LINK
+Bot: [Sends correlation text + scatter chart for DOGE vs LINK]
+```
+
+**By buttons:** Data Queries → **Correlation (BTC vs ETH)** → either tap **Default: BTC vs ETH** or tap a first coin, then tap a second coin (the first coin is excluded from the second selection). The bot then sends the full correlation result and scatter image.
+
+**Output includes:**
+- Overall correlation % and beta (e.g. if BTC +10%, ETH ≈ +14.7%)
+- Positive days: correlation and beta when the first coin had positive returns
+- Negative days: correlation and beta when the first coin had negative returns
+- Scatter plot image (green = positive days, red = negative days)
+
+**Note**: Requires dashboard to be running (uses market cap data). Default pair is BTC and ETH.
 
 ### Checking Status
 
