@@ -3,11 +3,32 @@
 Script to close GitHub issues that have been fixed.
 
 Usage:
-    python scripts/close_github_issues.py
+    python scripts/close_github_issues.py [issue_num ...]
+    Example: python scripts/close_github_issues.py 13 14
+
+Token: Set GITHUB_TOKEN or GH_TOKEN in environment, or put GITHUB_TOKEN=... in .env in project root.
 """
 
 import os
 import sys
+from pathlib import Path
+
+# Load .env from project root if present (so token can be in .env without exporting)
+_script_dir = Path(__file__).resolve().parent
+_project_root = _script_dir.parent
+_env_file = _project_root / ".env"
+if _env_file.exists():
+    try:
+        with open(_env_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, _, value = line.partition("=")
+                    key, value = key.strip(), value.strip().strip('"').strip("'")
+                    if key and value and key in ("GITHUB_TOKEN", "GH_TOKEN"):
+                        os.environ.setdefault(key, value)
+    except Exception:
+        pass
 
 # Fix Windows console encoding for emojis
 if sys.platform == "win32":
@@ -34,8 +55,11 @@ GITHUB_API_BASE = "https://api.github.com"
 # NOTE: 34 = Add Chart/Summary buttons to Data Queries menu (Telegram bot)
 # NOTE: 35 = Default all single-coin actions to BTC instead of ETH (Telegram bot)
 # NOTE: 36 = Remove ETH-specific Price/Info buttons from menus (Telegram bot)
-# NOTE: 37 = Add section navigation flow - show description before data (Telegram bot)
-FIXED_ISSUES = [15, 16, 17, 19, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37]
+# NOTE: 37 = Back to Data Queries button on List All Coins (Telegram bot)
+# NOTE: 38 = Resend Data Queries menu as latest message (Telegram bot)
+# NOTE: 13 = Correlation between 2 coins (numerical) - /corr default BTC/ETH
+# NOTE: 14 = Correlation with chart image (scatter plot)
+FIXED_ISSUES = [13, 14, 15, 16, 17, 19, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37, 38]
 
 # Commit hash (will be updated)
 COMMIT_HASH = "HEAD"
@@ -93,6 +117,17 @@ def close_issue(token: str, issue_number: int, commit_hash: str) -> bool:
 
 def main():
     """Main function to close all fixed issues."""
+    # Optional: close only specific issues e.g. python close_github_issues.py 37 38
+    if len(sys.argv) > 1:
+        try:
+            issues_to_close = [int(x) for x in sys.argv[1:]]
+        except ValueError:
+            print("Usage: python close_github_issues.py [issue_num ...]")
+            print("Example: python close_github_issues.py 37 38")
+            sys.exit(1)
+    else:
+        issues_to_close = FIXED_ISSUES
+
     print("🔒 Closing Fixed GitHub Issues")
     print("=" * 50)
     
@@ -100,13 +135,13 @@ def main():
     token = get_github_token()
     print(f"✅ Token found\n")
     
-    print(f"📋 Closing {len(FIXED_ISSUES)} issue(s)...")
+    print(f"📋 Closing {len(issues_to_close)} issue(s)...")
     print("=" * 50)
     
     closed = 0
     failed = 0
     
-    for issue_num in FIXED_ISSUES:
+    for issue_num in issues_to_close:
         print(f"🔒 Closing issue #{issue_num}...", end=" ")
         try:
             if close_issue(token, issue_num, COMMIT_HASH):
@@ -124,7 +159,7 @@ def main():
     print("📊 Summary:")
     print(f"   ✅ Closed: {closed}")
     print(f"   ❌ Failed: {failed}")
-    print(f"   📋 Total: {len(FIXED_ISSUES)}")
+    print(f"   📋 Total: {len(issues_to_close)}")
     
     if closed > 0:
         print(f"\n🎉 Successfully closed {closed} issue(s)!")

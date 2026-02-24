@@ -25,6 +25,7 @@ A comprehensive Telegram bot for controlling your Crypto Market Dashboard remote
 
 ### Data Queries
 - **Price Lookup**: Get latest price for any supported coin
+- **Correlation**: Correlation analysis between two coins (default BTC/ETH)—same logic as dashboard: returns correlation, beta, positive/negative days, and scatter chart image; choose coins via command or buttons
 - **Market Cap**: Query market capitalization data
 - **Coin List**: View all available cryptocurrencies
 - **Latest Prices**: Get top coins by market cap
@@ -158,6 +159,7 @@ Or manually via BotFather:
 | `/info <SYMBOL>` | Detailed coin info using dashboard history | `/info DOGE` |
 | `/summary <SYMBOL> [1d\|1w\|1m\|1y]` | 1d/1w/1m/1y price & market cap summary | `/summary BTC`, `/summary ETH 1m` |
 | `/chart <SYMBOL> [1w\|1m\|1y]` | Price & index chart image (dual Y-axis, logarithmic) | `/chart BTC`, `/chart ETH 1w`, `/chart DOGE 1m` |
+| `/corr [COIN1] [COIN2]` | Correlation between two coins (default: BTC ETH). Full analysis + scatter chart. Requires dashboard. | `/corr`, `/corr BTC ETH`, `/corr DOGE LINK` |
 
 ### Navigation
 
@@ -257,6 +259,29 @@ Last updated: 2026-02-09 12:34:56
 - `/chart DOGE 1y` - 1 year chart with daily data
 
 **Note**: Requires dashboard to be running for historical data access. Chart images are temporarily stored and automatically cleaned up.
+
+### Correlation (Two Coins)
+
+Get the same correlation analysis as the dashboard: overall correlation, beta, positive/negative day splits, and a scatter plot image.
+
+**By command:**
+```
+User: /corr
+Bot: [Sends correlation text + scatter chart image for BTC vs ETH]
+
+User: /corr DOGE LINK
+Bot: [Sends correlation text + scatter chart for DOGE vs LINK]
+```
+
+**By buttons:** Data Queries → **Correlation (BTC vs ETH)** → either tap **Default: BTC vs ETH** or tap a first coin, then tap a second coin (the first coin is excluded from the second selection). The bot then sends the full correlation result and scatter image.
+
+**Output includes:**
+- Overall correlation % and beta (e.g. if BTC +10%, ETH ≈ +14.7%)
+- Positive days: correlation and beta when the first coin had positive returns
+- Negative days: correlation and beta when the first coin had negative returns
+- Scatter plot image (green = positive days, red = negative days)
+
+**Note**: Requires dashboard to be running (uses market cap data). Default pair is BTC and ETH.
 
 ### Checking Status
 

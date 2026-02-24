@@ -22,8 +22,8 @@ This directory contains issue templates for problems found during code review.
 10. **010-bare-except-clauses.md** - Code Quality: Bare except clauses (Medium priority)
 11. **011-missing-type-hints.md** - Code Quality: Missing type hints (Low priority)
 12. **012-no-rate-limiting.md** - Enhancement: Rate limiting (Medium priority)
-13. **013-correlation-numerical.md** - Feature: Correlation between 2 coins (numerical)
-14. **014-correlation-chart.md** - Feature: Correlation between 2 coins (with chart image)
+13. **013-correlation-numerical.md** - Feature: Correlation between 2 coins (numerical) ✅ Fixed
+14. **014-correlation-chart.md** - Feature: Correlation between 2 coins (with chart image) ✅ Fixed
 15. **015-instant-price.md** - Feature: Instant price of coins ✅ Fixed
 16. **016-1year-chart-image.md** - Feature: 1 year chart image of coins ✅ Fixed
 17. **017-timeframe-summary.md** - Feature: 1d, 1w, 1m and 1y summary for coins ✅ Fixed
@@ -46,6 +46,8 @@ This directory contains issue templates for problems found during code review.
 34. **034-default-single-coin-actions-to-btc.md** - Enhancement: Default all single-coin actions to BTC instead of ETH (Medium priority)
 35. **035-remove-eth-price-info-buttons.md** - Enhancement: Remove ETH-specific Price and Info buttons from menus (Medium priority)
 36. **036-section-navigation-flow-description.md** - Enhancement: Add section navigation flow - show description before data (Medium priority)
+37. **037-coins-list-back-to-data-queries.md** - Enhancement: Add "Back to Data Queries" button when viewing List All Coins (Medium priority) ✅ Fixed
+38. **038-data-queries-buttons-resend-menu-message.md** - Enhancement: Resend Data Queries menu as latest message when selecting Data Queries buttons (Medium priority) ✅ Fixed
 
 ## Priority Guide
 

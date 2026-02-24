@@ -68,6 +68,7 @@ Control your dashboard remotely via Telegram! The bot allows you to:
 **Key Features:**
 - **Dashboard Control**: Start/stop dashboard remotely with per-user ownership tracking
 - **Instant Price Queries**: Get real-time prices without dashboard running (`/price BTC`)
+- **Correlation**: Full correlation analysis between two coins (default BTC/ETH) with scatter chart and coin buttons (`/corr` or Data Queries → Correlation)
 - **Timeframe Summaries**: 1d/1w/1m/1y price and market cap summaries (`/summary BTC 1m`)
 - **Chart Images**: Generate dual-axis logarithmic charts (price + indexed) for 1w/1m/1y (`/chart BTC 1w`)
 - **Coin Information**: Detailed coin data including supply, indexed price, all-time high/low (`/info BTC`)
@@ -140,6 +141,7 @@ CryptoMarket-Dashboard/
 ├── .gitignore                      # Git ignore rules
 ├── scripts/                         # Utility scripts
 │   ├── set_bot_description.py      # Set bot description via API
+│   ├── close_github_issues.py      # Close GitHub issues via API (uses GITHUB_TOKEN or .env)
 │   └── generate_static_dashboard.py # Generate static dashboard
 ├── docs/                            # GitHub Pages web version
 │   └── index.html                  # Interactive JavaScript dashboard
@@ -256,7 +258,14 @@ If you hit rate limits:
 
 ## Recent Updates
 
-### Latest Features (v2.3)
+### Latest Features (v2.4)
+- **Telegram Bot – Correlation**: Correlation between two coins in the bot (same logic as dashboard)
+  - `/corr` or `/corr COIN1 COIN2` (default: BTC and ETH)
+  - Data Queries → **Correlation** menu with **Default: BTC vs ETH** and buttons for all coins (pick first coin, then second; first is excluded from second selection)
+  - Full output: overall correlation %, beta, positive/negative day splits, and scatter chart image
+  - Requires dashboard running for market cap data
+
+### Previous Features (v2.3)
 - **GitHub Pages Deployment**: Added interactive web version deployed on GitHub Pages
   - Simplified JavaScript version focusing on BTC and ETH
   - All core features: smoothing, views, correlation analysis

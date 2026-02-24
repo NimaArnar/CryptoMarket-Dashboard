@@ -182,6 +182,9 @@ def create_data_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("📈 Latest Prices", callback_data="cmd_latest")
         ],
         [
+            InlineKeyboardButton("📊 Correlation (BTC vs ETH)", callback_data="menu_corr")
+        ],
+        [
             InlineKeyboardButton("💵 Price (BTC)", callback_data="price_BTC"),
         ],
         [
@@ -196,6 +199,42 @@ def create_data_keyboard() -> InlineKeyboardMarkup:
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
+
+
+def create_correlation_keyboard(exclude_symbol: Optional[str] = None) -> InlineKeyboardMarkup:
+    """Create keyboard for correlation: default BTC vs ETH + buttons for all coins.
+    When exclude_symbol is set (e.g. first coin chosen), that symbol is omitted from the list."""
+    from src.constants import COINS, DOM_SYM
+    symbols = sorted([sym for _, sym, _, _ in COINS])
+    symbols.append(DOM_SYM)
+    if exclude_symbol:
+        symbols = [s for s in symbols if s != exclude_symbol]
+    keyboard = [
+        [InlineKeyboardButton("📊 Default: BTC vs ETH", callback_data="corr_default")]
+    ]
+    # Coin buttons in rows of 4
+    row_size = 4
+    for i in range(0, len(symbols), row_size):
+        row = [
+            InlineKeyboardButton(sym, callback_data=f"corr_coin_{sym}")
+            for sym in symbols[i : i + row_size]
+        ]
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton("🔙 Back to Data Queries", callback_data="menu_data")])
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def _send_data_menu(chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send the Data Queries menu so it becomes the latest message (for UX after Data Queries actions)."""
+    try:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="💰 *Data Queries*\n\nGet real-time cryptocurrency data:",
+            parse_mode="Markdown",
+            reply_markup=create_data_keyboard()
+        )
+    except Exception as e:
+        logger.debug(f"Failed to resend Data Queries menu: {e}")
 
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -274,6 +313,110 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return
     
+    elif data == "menu_corr":
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete message: {e}")
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="📊 *Correlation*\n\nChoose default BTC vs ETH or tap two coins (first, then second):",
+            parse_mode="Markdown",
+            reply_markup=create_correlation_keyboard()
+        )
+        return
+    
+    elif data == "corr_default":
+        if not _check_dashboard_running():
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="⚠️ Dashboard is offline. Use /run to start it first.",
+                parse_mode="Markdown"
+            )
+            await _send_data_menu(chat_id, context)
+            return
+        try:
+            await query.edit_message_text("🔄 Computing correlation BTC vs ETH...")
+        except Exception:
+            pass
+        loop = asyncio.get_event_loop()
+        try:
+            corr_text, chart_path = await loop.run_in_executor(
+                None, _compute_and_export_correlation, "BTC", "ETH"
+            )
+            caption = f"📊 Correlation: BTC vs ETH\n\n{corr_text}"
+            if chart_path and chart_path.exists():
+                with open(chart_path, "rb") as photo:
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=photo,
+                        caption=caption[:1024] if len(caption) > 1024 else caption,
+                    )
+            else:
+                await context.bot.send_message(chat_id=chat_id, text=f"📊 Correlation\n\n{corr_text}")
+        except Exception as e:
+            logger.error(f"Correlation error: {e}")
+            await context.bot.send_message(chat_id=chat_id, text=f"❌ Error: {str(e)}")
+        await _send_data_menu(chat_id, context)
+        return
+    
+    elif data.startswith("corr_coin_"):
+        sym = data.replace("corr_coin_", "")
+        first = context.user_data.get("corr_first")
+        if first is None:
+            context.user_data["corr_first"] = sym
+            # Second selection keyboard excludes the first coin so user cannot pick same coin twice
+            try:
+                await query.edit_message_text(
+                    f"📊 First coin: *{sym}*. Tap the second coin:",
+                    parse_mode="Markdown",
+                    reply_markup=create_correlation_keyboard(exclude_symbol=sym)
+                )
+            except Exception:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"📊 First coin: {sym}. Tap the second coin:",
+                    reply_markup=create_correlation_keyboard(exclude_symbol=sym)
+                )
+            return
+        # exclude_symbol ensures first != sym in UI; this branch is only if state was stale
+        if first == sym:
+            await query.answer("Pick a different coin as second.", show_alert=True)
+            return
+        context.user_data.pop("corr_first", None)
+        if not _check_dashboard_running():
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="⚠️ Dashboard is offline. Use /run to start it first.",
+                parse_mode="Markdown"
+            )
+            await _send_data_menu(chat_id, context)
+            return
+        try:
+            await query.edit_message_text(f"🔄 Computing correlation {first} vs {sym}...")
+        except Exception:
+            pass
+        loop = asyncio.get_event_loop()
+        try:
+            corr_text, chart_path = await loop.run_in_executor(
+                None, _compute_and_export_correlation, first, sym
+            )
+            caption = f"📊 Correlation: {first} vs {sym}\n\n{corr_text}"
+            if chart_path and chart_path.exists():
+                with open(chart_path, "rb") as photo:
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=photo,
+                        caption=caption[:1024] if len(caption) > 1024 else caption,
+                    )
+            else:
+                await context.bot.send_message(chat_id=chat_id, text=f"📊 Correlation\n\n{corr_text}")
+        except Exception as e:
+            logger.error(f"Correlation error: {e}")
+            await context.bot.send_message(chat_id=chat_id, text=f"❌ Error: {str(e)}")
+        await _send_data_menu(chat_id, context)
+        return
+    
     elif data == "about":
         # Show bot information and purpose
         # Edit the existing message instead of sending new
@@ -326,7 +469,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "*/latest* - Live prices for all coins\n"
             "*/info <SYMBOL>* - Detailed coin information\n"
             "*/summary <SYMBOL> [1d|1w|1m|1y]* - Timeframe summary\n"
-            "*/chart <SYMBOL> [1w|1m|1y]* - Price & index chart image\n\n"
+            "*/chart <SYMBOL> [1w|1m|1y]* - Price & index chart image\n"
+            "*/corr [COIN1] [COIN2]* - Correlation (default: BTC ETH)\n\n"
             f"🌐 Dashboard: http://127.0.0.1:{DASH_PORT}/"
         )
         
@@ -400,11 +544,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif data == "cmd_coins":
         # Edit the existing message instead of sending a new one
         await coins_command_edit(query, context, 1)
+        await _send_data_menu(chat_id, context)
         return
     
     elif data == "cmd_latest":
         cmd_update = create_update_from_query()
         await latest_command(cmd_update, context)
+        await _send_data_menu(chat_id, context)
         return
     
     # Price and marketcap commands with symbol
@@ -427,6 +573,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         context.args = [symbol]
         cmd_update = create_update_from_query()
         await price_command(cmd_update, context)
+        await _send_data_menu(chat_id, context)
         return
     
     elif data.startswith("info_"):
@@ -448,6 +595,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         context.args = [symbol]
         cmd_update = create_update_from_query()
         await info_command(cmd_update, context)
+        await _send_data_menu(chat_id, context)
         return
     
     # Pagination for coins command
@@ -468,6 +616,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             context.args = [symbol, timeframe]
             cmd_update = create_update_from_query()
             await chart_command(cmd_update, context)
+            await _send_data_menu(chat_id, context)
         return
 
     # Summary command with symbol (from menu/button)
@@ -489,6 +638,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         context.args = [symbol]
         cmd_update = create_update_from_query()
         await summary_command(cmd_update, context)
+        await _send_data_menu(chat_id, context)
         return
 
     # Chart command from menu/button (default BTC, 1y) with section description
@@ -511,6 +661,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         context.args = [symbol]
         cmd_update = create_update_from_query()
         await chart_command(cmd_update, context)
+        await _send_data_menu(chat_id, context)
         return
 
 
@@ -520,7 +671,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "🤖 *Crypto Market Dashboard Bot*\n\n"
         "Welcome! Use the buttons below to control your dashboard and get crypto data.\n\n"
         "You can also use commands directly:\n"
-        "/run, /stop, /restart, /status, /price, /coins, /latest, /info, /summary, /chart, /help"
+        "/run, /stop, /restart, /status, /price, /coins, /latest, /info, /summary, /chart, /corr, /help"
     )
     
     keyboard = create_main_keyboard()
@@ -1604,7 +1755,8 @@ def _build_coins_message(page: int) -> tuple[str, Optional[InlineKeyboardMarkup]
         if page_buttons:
             keyboard_buttons.append(page_buttons)
     
-    # Back to main menu button
+    # Back to Data Queries and Back to Main Menu
+    keyboard_buttons.append([InlineKeyboardButton("🔙 Back to Data Queries", callback_data="menu_data")])
     keyboard_buttons.append([InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")])
     
     keyboard = InlineKeyboardMarkup(keyboard_buttons) if keyboard_buttons else None
@@ -2922,6 +3074,75 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
         return None
 
 
+def _compute_and_export_correlation(symbol_a: str, symbol_b: str) -> Tuple[str, Optional[Path]]:
+    """Compute correlation for two symbols and export scatter plot to PNG. Returns (message_text, image_path or None)."""
+    from src.app.callbacks import compute_correlation_for_bot
+    dm = _load_data_manager()
+    if dm.df_raw is None or dm.df_raw.empty:
+        return "No market cap data loaded. Use /run to start the dashboard, then try again.", None
+    corr_text, fig = compute_correlation_for_bot(dm.df_raw, symbol_a, symbol_b)
+    # Check for error responses (dashboard returns these as text)
+    if corr_text.startswith("Select exactly") or corr_text.startswith("Not enough") or corr_text.startswith("Cannot") or corr_text.startswith("No market cap"):
+        return corr_text, None
+    charts_dir = PROJECT_ROOT / "charts"
+    charts_dir.mkdir(exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    chart_filename = f"corr_{symbol_a}_{symbol_b}_{timestamp}.png"
+    chart_path = charts_dir / chart_filename
+    try:
+        fig.write_image(str(chart_path), width=900, height=600, scale=2)
+        return corr_text, chart_path
+    except Exception as e:
+        logger.error(f"Failed to export correlation image: {e}")
+        return corr_text, None
+
+
+@rate_limit(max_calls=10, period=60)
+async def corr_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /corr command - correlation between two coins (default: BTC and ETH). Full output as main program + chart image."""
+    # Default: BTC and ETH
+    if not context.args or len(context.args) < 2:
+        context.args = ["BTC", "ETH"]
+    symbol_a = context.args[0].upper()
+    symbol_b = context.args[1].upper()
+    log_user_action(update, "command", f"/corr {symbol_a} {symbol_b}")
+    if not validate_symbol(symbol_a) or not validate_symbol(symbol_b):
+        await update.message.reply_text(
+            "❌ Invalid symbol format. Use 1–10 alphanumeric characters.\nExample: /corr BTC ETH"
+        )
+        return
+    if not _check_dashboard_running():
+        await update.message.reply_text(
+            "⚠️ *Dashboard is offline*\n\nCorrelation uses dashboard market cap data. Use /run to start it first.",
+            parse_mode="Markdown"
+        )
+        return
+    loading_msg = None
+    try:
+        loading_msg = await create_loading_message(update)
+        loop = asyncio.get_event_loop()
+        corr_text, chart_path = await loop.run_in_executor(
+            None, _compute_and_export_correlation, symbol_a, symbol_b
+        )
+        await safe_delete_loading_message(loading_msg)
+        if chart_path and chart_path.exists():
+            caption = (
+                f"📊 Correlation: {symbol_a} vs {symbol_b}\n\n"
+                f"{corr_text}"
+            )
+            with open(chart_path, "rb") as photo:
+                await update.message.reply_photo(
+                    photo=photo,
+                    caption=caption[:1024] if len(caption) > 1024 else caption,
+                )
+        else:
+            await update.message.reply_text(f"📊 Correlation\n\n{corr_text}")
+    except Exception as e:
+        logger.error(f"Error in correlation for {symbol_a} vs {symbol_b}: {e}")
+        await safe_delete_loading_message(loading_msg)
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
 @rate_limit(max_calls=10, period=60)
 async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /chart command - generate and send chart image with dual Y-axes (price + indexed)."""
@@ -3260,6 +3481,7 @@ async def main_async() -> None:
             BotCommand("info", "Get detailed information for a coin (e.g., /info BTC)"),
             BotCommand("summary", "1d/1w/1m/1y price & market cap summary"),
             BotCommand("chart", "Price & index chart (1w/1m/1y, e.g., /chart BTC 1m)"),
+            BotCommand("corr", "Correlation between two coins (default: BTC ETH)"),
         ]
         await application.bot.set_my_commands(commands)
         logger.info("Bot commands registered successfully")
@@ -3299,6 +3521,7 @@ async def main_async() -> None:
     application.add_handler(CommandHandler("info", info_command))
     application.add_handler(CommandHandler("summary", summary_command))
     application.add_handler(CommandHandler("chart", chart_command))
+    application.add_handler(CommandHandler("corr", corr_command))
     
     # Unknown command handler (must be last to catch unhandled commands)
     # This catches any command that starts with / but isn't handled above
