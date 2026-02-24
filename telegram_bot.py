@@ -327,6 +327,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     
     elif data == "corr_default":
+        # Delete the previous Correlation/Data Queries message for a cleaner chat
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete Correlation message: {e}")
         if not _check_dashboard_running():
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -335,10 +340,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
             await _send_data_menu(chat_id, context)
             return
-        try:
-            await query.edit_message_text("🔄 Computing correlation BTC vs ETH...")
-        except Exception:
-            pass
         loop = asyncio.get_event_loop()
         try:
             corr_text, chart_path = await loop.run_in_executor(
@@ -401,10 +402,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
             await _send_data_menu(chat_id, context)
             return
+        # Delete the previous Correlation selection message for a cleaner chat
         try:
-            await query.edit_message_text(f"🔄 Computing correlation {first} vs {sym}...")
-        except Exception:
-            pass
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete Correlation message: {e}")
         loop = asyncio.get_event_loop()
         try:
             corr_text, chart_path = await loop.run_in_executor(
@@ -566,6 +568,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     
     elif data == "cmd_latest":
+        # Delete the previous Data Queries menu message for a cleaner chat
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete Data Queries message: {e}")
         cmd_update = create_update_from_query()
         await latest_command(cmd_update, context)
         await _send_data_menu(chat_id, context)
@@ -574,6 +581,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Price and marketcap commands with symbol
     elif data.startswith("price_"):
         symbol = data.split("_")[1]
+        # Delete the previous Data Queries menu message for a cleaner chat
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete Data Queries message: {e}")
         # Show section description before sending data
         price_desc = (
             "💵 *Price Section*\n\n"
@@ -596,6 +608,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     elif data.startswith("info_"):
         symbol = data.split("_")[1]
+        # Delete the previous Data Queries menu message for a cleaner chat
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete Data Queries message: {e}")
         # Show section description before sending data
         info_desc = (
             "📊 *Info Section*\n\n"
@@ -640,6 +657,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Summary command with symbol (from menu/button)
     elif data.startswith("summary_"):
         symbol = data.split("_")[1]
+        # Delete the previous Data Queries menu message for a cleaner chat
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete Data Queries message: {e}")
         summary_desc = (
             "📊 *Summary Section*\n\n"
             "Use /summary <SYMBOL> [1d|1w|1m|1y] to get timeframe performance for price and market cap.\n"
@@ -662,6 +684,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Chart command from menu/button (default BTC, 1y) with section description
     elif data.startswith("chartbtn_"):
         symbol = data.split("_")[1]
+        # Delete the previous Data Queries menu message for a cleaner chat
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete Data Queries message: {e}")
         chart_desc = (
             "📈 *Chart Section*\n\n"
             "Use /chart <SYMBOL> [1w|1m|1y] to get price & index charts with dual logarithmic axes.\n"
