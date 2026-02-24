@@ -354,6 +354,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     )
             else:
                 await context.bot.send_message(chat_id=chat_id, text=f"📊 Correlation\n\n{corr_text}")
+            # Issue #40: also send 1-year comparison chart
+            chart_1y_path = await loop.run_in_executor(None, _generate_two_coin_1y_chart, "BTC", "ETH")
+            if chart_1y_path and chart_1y_path.exists():
+                with open(chart_1y_path, "rb") as photo:
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=photo,
+                        caption="📈 1 Year comparison: BTC vs ETH (index 100 = start)",
+                    )
         except Exception as e:
             logger.error(f"Correlation error: {e}")
             await context.bot.send_message(chat_id=chat_id, text=f"❌ Error: {str(e)}")
@@ -411,6 +420,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     )
             else:
                 await context.bot.send_message(chat_id=chat_id, text=f"📊 Correlation\n\n{corr_text}")
+            # Issue #40: also send 1-year comparison chart
+            chart_1y_path = await loop.run_in_executor(None, _generate_two_coin_1y_chart, first, sym)
+            if chart_1y_path and chart_1y_path.exists():
+                with open(chart_1y_path, "rb") as photo:
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=photo,
+                        caption=f"📈 1 Year comparison: {first} vs {sym} (index 100 = start)",
+                    )
         except Exception as e:
             logger.error(f"Correlation error: {e}")
             await context.bot.send_message(chat_id=chat_id, text=f"❌ Error: {str(e)}")
@@ -3074,6 +3092,66 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
         return None
 
 
+def _generate_two_coin_1y_chart(symbol_a: str, symbol_b: str) -> Optional[Path]:
+    """Generate a 1-year indexed comparison chart for two coins (both normalized to 100 at start). Returns path to PNG or None."""
+    from src.app.callbacks import _load_price_data
+    prices_dict = _load_price_data()
+    pa = prices_dict.get(symbol_a)
+    pb = prices_dict.get(symbol_b)
+    if pa is None or pa.empty or pb is None or pb.empty:
+        return None
+    pa = pa.dropna().sort_index()
+    pb = pb.dropna().sort_index()
+    # Align to common dates (inner join), then take last 365 days
+    common = pa.index.intersection(pb.index).sort_values()
+    if len(common) < 2:
+        return None
+    end = common[-1]
+    start_365 = end - pd.Timedelta(days=365)
+    common = common[common >= start_365]
+    if len(common) < 2:
+        return None
+    pa = pa.reindex(common).ffill().bfill()
+    pb = pb.reindex(common).ffill().bfill()
+    # Index both to 100 at first date
+    base_a = pa.iloc[0]
+    base_b = pb.iloc[0]
+    if base_a <= 0 or base_b <= 0:
+        return None
+    idx_a = (pa / base_a) * 100
+    idx_b = (pb / base_b) * 100
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=idx_a.index, y=idx_a.values, mode="lines", name=symbol_a,
+        line=dict(width=2), hovertemplate=f"{symbol_a}: %{{y:.1f}}<extra></extra>"
+    ))
+    fig.add_trace(go.Scatter(
+        x=idx_b.index, y=idx_b.values, mode="lines", name=symbol_b,
+        line=dict(width=2), hovertemplate=f"{symbol_b}: %{{y:.1f}}<extra></extra>"
+    ))
+    fig.update_layout(
+        title=dict(text=f"1 Year Comparison — {symbol_a} vs {symbol_b} (Index 100 = start)", font=dict(size=14)),
+        xaxis=dict(title="Date", type="date", showgrid=True),
+        yaxis=dict(title="Index (100 = start)", showgrid=True, tickformat=".0f"),
+        hovermode="x unified",
+        template="plotly_white",
+        width=900,
+        height=500,
+        margin=dict(l=60, r=40, t=50, b=50),
+        legend=dict(x=0.02, y=0.98),
+    )
+    charts_dir = PROJECT_ROOT / "charts"
+    charts_dir.mkdir(exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = charts_dir / f"corr_1y_{symbol_a}_{symbol_b}_{timestamp}.png"
+    try:
+        fig.write_image(str(path), width=900, height=500, scale=2)
+        return path
+    except Exception as e:
+        logger.debug(f"Failed to export 1y comparison chart: {e}")
+        return None
+
+
 def _compute_and_export_correlation(symbol_a: str, symbol_b: str) -> Tuple[str, Optional[Path]]:
     """Compute correlation for two symbols and export scatter plot to PNG. Returns (message_text, image_path or None)."""
     from src.app.callbacks import compute_correlation_for_bot
@@ -3137,6 +3215,14 @@ async def corr_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 )
         else:
             await update.message.reply_text(f"📊 Correlation\n\n{corr_text}")
+        # Issue #40: also send 1-year comparison chart of the two coins
+        chart_1y_path = await loop.run_in_executor(None, _generate_two_coin_1y_chart, symbol_a, symbol_b)
+        if chart_1y_path and chart_1y_path.exists():
+            with open(chart_1y_path, "rb") as photo:
+                await update.message.reply_photo(
+                    photo=photo,
+                    caption=f"📈 1 Year comparison: {symbol_a} vs {symbol_b} (index 100 = start)",
+                )
     except Exception as e:
         logger.error(f"Error in correlation for {symbol_a} vs {symbol_b}: {e}")
         await safe_delete_loading_message(loading_msg)
