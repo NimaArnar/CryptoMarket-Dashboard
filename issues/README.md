@@ -51,6 +51,7 @@ This directory contains issue templates for problems found during code review.
 39. **039-correlation-send-1y-chart-two-coins.md** - Feature: When using correlation, also send a 1-year chart of the two selected coins (Medium priority) ✅ Fixed
 40. **040-watchlist-for-telegram-users.md** - Feature: Create watchlist for Telegram users (Medium priority)
 41. **041-add-coins-from-yahoo-finance-api.md** - Feature: Add coins not in program and load from Yahoo Finance (or similar) API (Medium priority)
+42. **042-data-queries-labels-command-name-only.md** - Enhancement: In Data Queries show only command name (no "BTC"); use BTC as default when selected (Low priority) ✅ Fixed
 
 ## Priority Guide
 

@@ -182,17 +182,17 @@ def create_data_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("📈 Latest Prices", callback_data="cmd_latest")
         ],
         [
-            InlineKeyboardButton("📊 Correlation (BTC vs ETH)", callback_data="menu_corr")
+            InlineKeyboardButton("📊 Correlation", callback_data="menu_corr")
         ],
         [
-            InlineKeyboardButton("💵 Price (BTC)", callback_data="price_BTC"),
+            InlineKeyboardButton("💵 Price", callback_data="price_BTC"),
         ],
         [
-            InlineKeyboardButton("📊 Info (BTC)", callback_data="info_BTC"),
+            InlineKeyboardButton("📊 Info", callback_data="info_BTC"),
         ],
         [
-            InlineKeyboardButton("📊 Summary (BTC)", callback_data="summary_BTC"),
-            InlineKeyboardButton("📈 Chart (BTC)", callback_data="chartbtn_BTC"),
+            InlineKeyboardButton("📊 Summary", callback_data="summary_BTC"),
+            InlineKeyboardButton("📈 Chart", callback_data="chartbtn_BTC"),
         ],
         [
             InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
@@ -202,7 +202,7 @@ def create_data_keyboard() -> InlineKeyboardMarkup:
 
 
 def create_correlation_keyboard(exclude_symbol: Optional[str] = None) -> InlineKeyboardMarkup:
-    """Create keyboard for correlation: default BTC vs ETH + buttons for all coins.
+    """Create keyboard for correlation: default (BTC vs ETH) + buttons for all coins.
     When exclude_symbol is set (e.g. first coin chosen), that symbol is omitted from the list."""
     from src.constants import COINS, DOM_SYM
     symbols = sorted([sym for _, sym, _, _ in COINS])
@@ -210,7 +210,7 @@ def create_correlation_keyboard(exclude_symbol: Optional[str] = None) -> InlineK
     if exclude_symbol:
         symbols = [s for s in symbols if s != exclude_symbol]
     keyboard = [
-        [InlineKeyboardButton("📊 Default: BTC vs ETH", callback_data="corr_default")]
+        [InlineKeyboardButton("📊 Default", callback_data="corr_default")]
     ]
     # Coin buttons in rows of 4
     row_size = 4
@@ -320,7 +320,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             logger.debug(f"Could not delete message: {e}")
         await context.bot.send_message(
             chat_id=chat_id,
-            text="📊 *Correlation*\n\nChoose default BTC vs ETH or tap two coins (first, then second):",
+            text="📊 *Correlation*\n\nChoose default or tap two coins (first, then second):",
             parse_mode="Markdown",
             reply_markup=create_correlation_keyboard()
         )
