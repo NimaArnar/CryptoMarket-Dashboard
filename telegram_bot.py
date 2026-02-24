@@ -651,7 +651,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             context.args = [symbol, timeframe]
             cmd_update = create_update_from_query()
             await chart_command(cmd_update, context)
-            await _send_data_menu(chat_id, context)
         return
 
     # Summary command with symbol (from menu/button)
@@ -706,7 +705,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         context.args = [symbol]
         cmd_update = create_update_from_query()
         await chart_command(cmd_update, context)
-        await _send_data_menu(chat_id, context)
         return
 
 
@@ -3415,7 +3413,7 @@ async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 f"Last updated: {format_timestamp(latest_date)}"
             )
         
-        # Create keyboard with timeframe options
+        # Create keyboard with timeframe options and navigation
         keyboard_buttons = []
         timeframe_row = []
         for tf in ["1w", "1m", "1y"]:
@@ -3426,7 +3424,12 @@ async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 ))
         if timeframe_row:
             keyboard_buttons.append(timeframe_row)
-        keyboard_buttons.append([InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")])
+        # Navigation: allow going back to Data Queries or Main Menu
+        nav_row = [
+            InlineKeyboardButton("🔙 Back to Data Queries", callback_data="menu_data"),
+            InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main"),
+        ]
+        keyboard_buttons.append(nav_row)
         keyboard = InlineKeyboardMarkup(keyboard_buttons) if keyboard_buttons else None
         
         # Send chart image
