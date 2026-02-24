@@ -182,17 +182,17 @@ def create_data_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("📈 Latest Prices", callback_data="cmd_latest")
         ],
         [
-            InlineKeyboardButton("📊 Correlation (BTC vs ETH)", callback_data="menu_corr")
+            InlineKeyboardButton("📊 Correlation", callback_data="menu_corr")
         ],
         [
-            InlineKeyboardButton("💵 Price (BTC)", callback_data="price_BTC"),
+            InlineKeyboardButton("💵 Price", callback_data="price_BTC"),
         ],
         [
-            InlineKeyboardButton("📊 Info (BTC)", callback_data="info_BTC"),
+            InlineKeyboardButton("📊 Info", callback_data="info_BTC"),
         ],
         [
-            InlineKeyboardButton("📊 Summary (BTC)", callback_data="summary_BTC"),
-            InlineKeyboardButton("📈 Chart (BTC)", callback_data="chartbtn_BTC"),
+            InlineKeyboardButton("📊 Summary", callback_data="summary_BTC"),
+            InlineKeyboardButton("📈 Chart", callback_data="chartbtn_BTC"),
         ],
         [
             InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")
@@ -202,7 +202,7 @@ def create_data_keyboard() -> InlineKeyboardMarkup:
 
 
 def create_correlation_keyboard(exclude_symbol: Optional[str] = None) -> InlineKeyboardMarkup:
-    """Create keyboard for correlation: default BTC vs ETH + buttons for all coins.
+    """Create keyboard for correlation: default (BTC vs ETH) + buttons for all coins.
     When exclude_symbol is set (e.g. first coin chosen), that symbol is omitted from the list."""
     from src.constants import COINS, DOM_SYM
     symbols = sorted([sym for _, sym, _, _ in COINS])
@@ -210,7 +210,7 @@ def create_correlation_keyboard(exclude_symbol: Optional[str] = None) -> InlineK
     if exclude_symbol:
         symbols = [s for s in symbols if s != exclude_symbol]
     keyboard = [
-        [InlineKeyboardButton("📊 Default: BTC vs ETH", callback_data="corr_default")]
+        [InlineKeyboardButton("📊 Default", callback_data="corr_default")]
     ]
     # Coin buttons in rows of 4
     row_size = 4
@@ -320,13 +320,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             logger.debug(f"Could not delete message: {e}")
         await context.bot.send_message(
             chat_id=chat_id,
-            text="📊 *Correlation*\n\nChoose default BTC vs ETH or tap two coins (first, then second):",
+            text="📊 *Correlation*\n\nChoose default or tap two coins (first, then second):",
             parse_mode="Markdown",
             reply_markup=create_correlation_keyboard()
         )
         return
     
     elif data == "corr_default":
+        # Delete the previous Correlation/Data Queries message for a cleaner chat
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete Correlation message: {e}")
         if not _check_dashboard_running():
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -335,10 +340,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
             await _send_data_menu(chat_id, context)
             return
-        try:
-            await query.edit_message_text("🔄 Computing correlation BTC vs ETH...")
-        except Exception:
-            pass
         loop = asyncio.get_event_loop()
         try:
             corr_text, chart_path = await loop.run_in_executor(
@@ -354,6 +355,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     )
             else:
                 await context.bot.send_message(chat_id=chat_id, text=f"📊 Correlation\n\n{corr_text}")
+            # Issue #40: also send 1-year comparison chart
+            chart_1y_path = await loop.run_in_executor(None, _generate_two_coin_1y_chart, "BTC", "ETH")
+            if chart_1y_path and chart_1y_path.exists():
+                with open(chart_1y_path, "rb") as photo:
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=photo,
+                        caption="📈 1 Year comparison: BTC vs ETH (index 100 = start)",
+                    )
         except Exception as e:
             logger.error(f"Correlation error: {e}")
             await context.bot.send_message(chat_id=chat_id, text=f"❌ Error: {str(e)}")
@@ -392,10 +402,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
             await _send_data_menu(chat_id, context)
             return
+        # Delete the previous Correlation selection message for a cleaner chat
         try:
-            await query.edit_message_text(f"🔄 Computing correlation {first} vs {sym}...")
-        except Exception:
-            pass
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete Correlation message: {e}")
         loop = asyncio.get_event_loop()
         try:
             corr_text, chart_path = await loop.run_in_executor(
@@ -411,6 +422,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     )
             else:
                 await context.bot.send_message(chat_id=chat_id, text=f"📊 Correlation\n\n{corr_text}")
+            # Issue #40: also send 1-year comparison chart
+            chart_1y_path = await loop.run_in_executor(None, _generate_two_coin_1y_chart, first, sym)
+            if chart_1y_path and chart_1y_path.exists():
+                with open(chart_1y_path, "rb") as photo:
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=photo,
+                        caption=f"📈 1 Year comparison: {first} vs {sym} (index 100 = start)",
+                    )
         except Exception as e:
             logger.error(f"Correlation error: {e}")
             await context.bot.send_message(chat_id=chat_id, text=f"❌ Error: {str(e)}")
@@ -548,6 +568,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     
     elif data == "cmd_latest":
+        # Delete the previous Data Queries menu message for a cleaner chat
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete Data Queries message: {e}")
         cmd_update = create_update_from_query()
         await latest_command(cmd_update, context)
         await _send_data_menu(chat_id, context)
@@ -556,6 +581,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Price and marketcap commands with symbol
     elif data.startswith("price_"):
         symbol = data.split("_")[1]
+        # Delete the previous Data Queries menu message for a cleaner chat
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete Data Queries message: {e}")
         # Show section description before sending data
         price_desc = (
             "💵 *Price Section*\n\n"
@@ -578,6 +608,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     elif data.startswith("info_"):
         symbol = data.split("_")[1]
+        # Delete the previous Data Queries menu message for a cleaner chat
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete Data Queries message: {e}")
         # Show section description before sending data
         info_desc = (
             "📊 *Info Section*\n\n"
@@ -622,6 +657,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Summary command with symbol (from menu/button)
     elif data.startswith("summary_"):
         symbol = data.split("_")[1]
+        # Delete the previous Data Queries menu message for a cleaner chat
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete Data Queries message: {e}")
         summary_desc = (
             "📊 *Summary Section*\n\n"
             "Use /summary <SYMBOL> [1d|1w|1m|1y] to get timeframe performance for price and market cap.\n"
@@ -644,6 +684,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Chart command from menu/button (default BTC, 1y) with section description
     elif data.startswith("chartbtn_"):
         symbol = data.split("_")[1]
+        # Delete the previous Data Queries menu message for a cleaner chat
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete Data Queries message: {e}")
         chart_desc = (
             "📈 *Chart Section*\n\n"
             "Use /chart <SYMBOL> [1w|1m|1y] to get price & index charts with dual logarithmic axes.\n"
@@ -3074,6 +3119,66 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
         return None
 
 
+def _generate_two_coin_1y_chart(symbol_a: str, symbol_b: str) -> Optional[Path]:
+    """Generate a 1-year indexed comparison chart for two coins (both normalized to 100 at start). Returns path to PNG or None."""
+    from src.app.callbacks import _load_price_data
+    prices_dict = _load_price_data()
+    pa = prices_dict.get(symbol_a)
+    pb = prices_dict.get(symbol_b)
+    if pa is None or pa.empty or pb is None or pb.empty:
+        return None
+    pa = pa.dropna().sort_index()
+    pb = pb.dropna().sort_index()
+    # Align to common dates (inner join), then take last 365 days
+    common = pa.index.intersection(pb.index).sort_values()
+    if len(common) < 2:
+        return None
+    end = common[-1]
+    start_365 = end - pd.Timedelta(days=365)
+    common = common[common >= start_365]
+    if len(common) < 2:
+        return None
+    pa = pa.reindex(common).ffill().bfill()
+    pb = pb.reindex(common).ffill().bfill()
+    # Index both to 100 at first date
+    base_a = pa.iloc[0]
+    base_b = pb.iloc[0]
+    if base_a <= 0 or base_b <= 0:
+        return None
+    idx_a = (pa / base_a) * 100
+    idx_b = (pb / base_b) * 100
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=idx_a.index, y=idx_a.values, mode="lines", name=symbol_a,
+        line=dict(width=2), hovertemplate=f"{symbol_a}: %{{y:.1f}}<extra></extra>"
+    ))
+    fig.add_trace(go.Scatter(
+        x=idx_b.index, y=idx_b.values, mode="lines", name=symbol_b,
+        line=dict(width=2), hovertemplate=f"{symbol_b}: %{{y:.1f}}<extra></extra>"
+    ))
+    fig.update_layout(
+        title=dict(text=f"1 Year Comparison — {symbol_a} vs {symbol_b} (Index 100 = start)", font=dict(size=14)),
+        xaxis=dict(title="Date", type="date", showgrid=True),
+        yaxis=dict(title="Index (100 = start)", showgrid=True, tickformat=".0f"),
+        hovermode="x unified",
+        template="plotly_white",
+        width=900,
+        height=500,
+        margin=dict(l=60, r=40, t=50, b=50),
+        legend=dict(x=0.02, y=0.98),
+    )
+    charts_dir = PROJECT_ROOT / "charts"
+    charts_dir.mkdir(exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = charts_dir / f"corr_1y_{symbol_a}_{symbol_b}_{timestamp}.png"
+    try:
+        fig.write_image(str(path), width=900, height=500, scale=2)
+        return path
+    except Exception as e:
+        logger.debug(f"Failed to export 1y comparison chart: {e}")
+        return None
+
+
 def _compute_and_export_correlation(symbol_a: str, symbol_b: str) -> Tuple[str, Optional[Path]]:
     """Compute correlation for two symbols and export scatter plot to PNG. Returns (message_text, image_path or None)."""
     from src.app.callbacks import compute_correlation_for_bot
@@ -3137,6 +3242,14 @@ async def corr_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 )
         else:
             await update.message.reply_text(f"📊 Correlation\n\n{corr_text}")
+        # Issue #40: also send 1-year comparison chart of the two coins
+        chart_1y_path = await loop.run_in_executor(None, _generate_two_coin_1y_chart, symbol_a, symbol_b)
+        if chart_1y_path and chart_1y_path.exists():
+            with open(chart_1y_path, "rb") as photo:
+                await update.message.reply_photo(
+                    photo=photo,
+                    caption=f"📈 1 Year comparison: {symbol_a} vs {symbol_b} (index 100 = start)",
+                )
     except Exception as e:
         logger.error(f"Error in correlation for {symbol_a} vs {symbol_b}: {e}")
         await safe_delete_loading_message(loading_msg)
