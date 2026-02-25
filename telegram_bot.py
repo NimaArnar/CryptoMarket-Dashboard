@@ -3616,14 +3616,17 @@ async def corr_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 )
         else:
             await update.message.reply_text(f"📊 Correlation\n\n{corr_text}")
-        # Issue #40: also send 1-year comparison chart of the two assets
-        chart_1y_path = await loop.run_in_executor(None, _generate_two_coin_1y_chart, symbol_a, symbol_b)
-        if chart_1y_path and chart_1y_path.exists():
-            with open(chart_1y_path, "rb") as photo:
-                await update.message.reply_photo(
-                    photo=photo,
-                    caption=f"📈 1 Year comparison: {symbol_a} vs {symbol_b} (index 100 = start)",
-                )
+
+        # Issue #40: also send 1-year comparison chart of the two assets.
+        # For pairs involving commodities, skip the 1y chart to avoid issues with mixed data sources.
+        if not is_commodity_pair:
+            chart_1y_path = await loop.run_in_executor(None, _generate_two_coin_1y_chart, symbol_a, symbol_b)
+            if chart_1y_path and chart_1y_path.exists():
+                with open(chart_1y_path, "rb") as photo:
+                    await update.message.reply_photo(
+                        photo=photo,
+                        caption=f"📈 1 Year comparison: {symbol_a} vs {symbol_b} (index 100 = start)",
+                    )
     except Exception as e:
         logger.error(f"Error in correlation for {symbol_a} vs {symbol_b}: {e}")
         await safe_delete_loading_message(loading_msg)
