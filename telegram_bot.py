@@ -3042,11 +3042,6 @@ def _generate_chart_image(symbol: str, coin_id: Optional[str], price_series: pd.
         # Log price range for debugging
         logger.debug(f"Chart for {symbol}: min=${min_price:.8f}, max=${max_price:.8f}, count={len(timeframe_data)}")
         
-        # Verify we have valid data (not all zeros)
-        if timeframe_data.sum() == 0 or all(v == 0 for v in timeframe_data.values):
-            logger.error(f"All price values are zero for {symbol} - cannot generate chart")
-            return None
-        
         # Determine tick format and hover precision based on price magnitude
         if max_price < 0.01:
             # Very small prices (< $0.01): use 6 decimal places
@@ -3232,10 +3227,6 @@ def _generate_commodity_chart_image(symbol: str, timeframe: str, days: int) -> O
         max_price = timeframe_data.max()
         min_price = timeframe_data.min()
         logger.debug(f"Commodity chart for {symbol}: min=${min_price:.8f}, max=${max_price:.8f}, count={len(timeframe_data)}")
-
-        if timeframe_data.sum() == 0 or all(v == 0 for v in timeframe_data.values):
-            logger.error(f"All commodity price values are zero for {symbol} - cannot generate chart")
-            return None
 
         # Tick format / precision similar to crypto charts
         if max_price < 0.01:
