@@ -3024,20 +3024,20 @@ def _generate_chart_image(symbol: str, coin_id: Optional[str], price_series: pd.
         first_price = timeframe_data.iloc[0]
         indexed_price = (timeframe_data / first_price) * 100
         
-        # Determine appropriate decimal precision based on price range
+        # Determine appropriate decimal precision based on price range.
+        # Guard against max()/min() returning a Series in any edge case.
         max_price_raw = timeframe_data.max()
         min_price_raw = timeframe_data.min()
 
-        # Ensure scalar floats for logging/formatting even if max/min return a Series
-        try:
-            max_price = float(getattr(max_price_raw, "iloc", lambda idx: max_price_raw)(0)) if hasattr(max_price_raw, "iloc") else float(max_price_raw)
-        except Exception:
-            max_price = float(max_price_raw.values[0]) if hasattr(max_price_raw, "values") else float(max_price_raw)
+        if isinstance(max_price_raw, pd.Series):
+            max_price = float(max_price_raw.iloc[0])
+        else:
+            max_price = float(max_price_raw)
 
-        try:
-            min_price = float(getattr(min_price_raw, "iloc", lambda idx: min_price_raw)(0)) if hasattr(min_price_raw, "iloc") else float(min_price_raw)
-        except Exception:
-            min_price = float(min_price_raw.values[0]) if hasattr(min_price_raw, "values") else float(min_price_raw)
+        if isinstance(min_price_raw, pd.Series):
+            min_price = float(min_price_raw.iloc[0])
+        else:
+            min_price = float(min_price_raw)
 
         # Log price range for debugging
         logger.debug(f"Chart for {symbol}: min=${min_price:.8f}, max=${max_price:.8f}, count={len(timeframe_data)}")
