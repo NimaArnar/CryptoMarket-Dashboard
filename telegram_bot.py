@@ -3479,89 +3479,99 @@ def _compute_and_export_price_correlation(symbol_a: str, symbol_b: str) -> Tuple
     symbol_a = symbol_a.upper()
     symbol_b = symbol_b.upper()
 
-    pa = _load_price_series_for_symbol(symbol_a, min_days=365)
-    pb = _load_price_series_for_symbol(symbol_b, min_days=365)
-    if pa is None or pb is None or pa.empty or pb.empty:
-        return (
-            f"❌ Could not load sufficient price history for {symbol_a} or {symbol_b}. "
-            "Make sure both symbols are supported and have historical data.",
-            None,
-        )
-
-    # Align on common dates
-    pa = pa.dropna().sort_index()
-    pb = pb.dropna().sort_index()
-    common = pa.index.intersection(pb.index).sort_values()
-    if len(common) < 10:
-        return (
-            "Not enough overlapping history between the two assets to compute a reliable correlation.",
-            None,
-        )
-    pa = pa.reindex(common).ffill().bfill()
-    pb = pb.reindex(common).ffill().bfill()
-
-    # Daily returns
-    ra = pa.pct_change().dropna()
-    rb = pb.pct_change().dropna()
-    common_ret = ra.index.intersection(rb.index).sort_values()
-    if len(common_ret) < 10:
-        return (
-            "Not enough overlapping daily returns between the two assets to compute a reliable correlation.",
-            None,
-        )
-    ra = ra.reindex(common_ret)
-    rb = rb.reindex(common_ret)
-
-    corr_value = ra.corr(rb)
-    start_date = common_ret[0].strftime("%Y-%m-%d")
-    end_date = common_ret[-1].strftime("%Y-%m-%d")
-    n_points = len(common_ret)
-
-    corr_text = (
-        f"Correlation of daily returns between *{symbol_a}* and *{symbol_b}*.\n\n"
-        f"Window: {start_date} → {end_date} ({n_points} days)\n"
-        f"Pearson correlation: {corr_value:+.3f}"
-    )
-
-    # Build scatter plot
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=ra.values,
-            y=rb.values,
-            mode="markers",
-            marker=dict(size=6, color="#1f77b4", opacity=0.7),
-            name=f"{symbol_a} vs {symbol_b}",
-            hovertemplate=(
-                f"{symbol_a} return: %{{x:.2%}}<br>"
-                f"{symbol_b} return: %{{y:.2%}}<extra></extra>"
-            ),
-        )
-    )
-    fig.update_layout(
-        title=dict(
-            text=f"Daily Returns Correlation — {symbol_a} vs {symbol_b}",
-            font=dict(size=14),
-        ),
-        xaxis=dict(title=f"{symbol_a} daily return", zeroline=True, zerolinecolor="#888"),
-        yaxis=dict(title=f"{symbol_b} daily return", zeroline=True, zerolinecolor="#888"),
-        template="plotly_white",
-        width=900,
-        height=500,
-        margin=dict(l=60, r=40, t=50, b=50),
-    )
-
-    charts_dir = PROJECT_ROOT / "charts"
-    charts_dir.mkdir(exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    chart_filename = f"corr_price_{symbol_a}_{symbol_b}_{timestamp}.png"
-    chart_path = charts_dir / chart_filename
     try:
+        pa = _load_price_series_for_symbol(symbol_a, min_days=365)
+        pb = _load_price_series_for_symbol(symbol_b, min_days=365)
+        if pa is None or pb is None or pa.empty or pb.empty:
+            return (
+                f"❌ Could not load sufficient price history for {symbol_a} or {symbol_b}. "
+                "Make sure both symbols are supported and have historical data.",
+                None,
+            )
+
+        # Align on common dates
+        pa = pa.dropna().sort_index()
+        pb = pb.dropna().sort_index()
+        common = pa.index.intersection(pb.index).sort_values()
+        if len(common) < 10:
+            return (
+                "Not enough overlapping history between the two assets to compute a reliable correlation.",
+                None,
+            )
+        pa = pa.reindex(common).ffill().bfill()
+        pb = pb.reindex(common).ffill().bfill()
+
+        # Daily returns
+        ra = pa.pct_change().dropna()
+        rb = pb.pct_change().dropna()
+        common_ret = ra.index.intersection(rb.index).sort_values()
+        if len(common_ret) < 10:
+            return (
+                "Not enough overlapping daily returns between the two assets to compute a reliable correlation.",
+                None,
+            )
+        ra = ra.reindex(common_ret)
+        rb = rb.reindex(common_ret)
+
+        # Ensure we are working with 1D Series (not DataFrames)
+        if isinstance(ra, pd.DataFrame):
+            ra = ra.iloc[:, 0]
+        if isinstance(rb, pd.DataFrame):
+            rb = rb.iloc[:, 0]
+
+        corr_value = ra.corr(rb)
+        start_date = common_ret[0].strftime("%Y-%m-%d")
+        end_date = common_ret[-1].strftime("%Y-%m-%d")
+        n_points = len(common_ret)
+
+        corr_text = (
+            f"Correlation of daily returns between *{symbol_a}* and *{symbol_b}*.\n\n"
+            f"Window: {start_date} → {end_date} ({n_points} days)\n"
+            f"Pearson correlation: {corr_value:+.3f}"
+        )
+
+        # Build scatter plot
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=ra.values,
+                y=rb.values,
+                mode="markers",
+                marker=dict(size=6, color="#1f77b4", opacity=0.7),
+                name=f"{symbol_a} vs {symbol_b}",
+                hovertemplate=(
+                    f"{symbol_a} return: %{{x:.2%}}<br>"
+                    f"{symbol_b} return: %{{y:.2%}}<extra></extra>"
+                ),
+            )
+        )
+        fig.update_layout(
+            title=dict(
+                text=f"Daily Returns Correlation — {symbol_a} vs {symbol_b}",
+                font=dict(size=14),
+            ),
+            xaxis=dict(title=f"{symbol_a} daily return", zeroline=True, zerolinecolor="#888"),
+            yaxis=dict(title=f"{symbol_b} daily return", zeroline=True, zerolinecolor="#888"),
+            template="plotly_white",
+            width=900,
+            height=500,
+            margin=dict(l=60, r=40, t=50, b=50),
+        )
+
+        charts_dir = PROJECT_ROOT / "charts"
+        charts_dir.mkdir(exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        chart_filename = f"corr_price_{symbol_a}_{symbol_b}_{timestamp}.png"
+        chart_path = charts_dir / chart_filename
         fig.write_image(str(chart_path), width=900, height=500, scale=2)
         return corr_text, chart_path
     except Exception as e:
-        logger.error(f"Failed to export price-based correlation image: {e}")
-        return corr_text, None
+        logger.error(f"Failed to compute or export price-based correlation for {symbol_a} vs {symbol_b}: {e}")
+        return (
+            "❌ Could not compute price-based correlation for this pair right now. "
+            "Please try again later.",
+            None,
+        )
 
 
 @rate_limit(max_calls=10, period=60)
