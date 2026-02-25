@@ -9,32 +9,34 @@ from src.constants import DOM_SYM
 
 def compute_usdt_d_index(df_smoothed: pd.DataFrame) -> Optional[pd.Series]:
     """
-    Compute USDT dominance index.
+    Compute stablecoin dominance index (STABLES.D).
     
-    Calculates USDT as percentage of total market cap, normalized to start at 100.
+    Calculates aggregate stablecoins as percentage of total market cap,
+    normalized to start at 100.
     
     Args:
         df_smoothed: DataFrame with smoothed market cap data
     
     Returns:
-        USDT dominance index Series or None if USDT not available
+        Stablecoin dominance index Series or None if data not available
     """
-    if "USDT" not in df_smoothed.columns:
+    # Expect an aggregate stablecoin series named STABLES (built in DataManager)
+    if "STABLES" not in df_smoothed.columns:
         return None
     
     total_est = df_smoothed.sum(axis=1)
     if (total_est == 0).any():
         return None
     
-    usdt_d_pct = (df_smoothed["USDT"] / total_est) * 100.0
+    stables_pct = (df_smoothed["STABLES"] / total_est) * 100.0
     # Normalize to start at 100
-    s2 = usdt_d_pct.dropna()
+    s2 = stables_pct.dropna()
     if s2.empty:
-        return usdt_d_pct
+        return stables_pct
     first = s2.iloc[0]
     if first == 0:
-        return usdt_d_pct
-    return (usdt_d_pct / first) * 100
+        return stables_pct
+    return (stables_pct / first) * 100
 
 
 def series_for_symbol(

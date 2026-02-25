@@ -49,10 +49,12 @@ This directory contains issue templates for problems found during code review.
 37. **037-coins-list-back-to-data-queries.md** - Enhancement: Add "Back to Data Queries" button when viewing List All Coins (Medium priority) ✅ Fixed
 38. **038-data-queries-buttons-resend-menu-message.md** - Enhancement: Resend Data Queries menu as latest message when selecting Data Queries buttons (Medium priority) ✅ Fixed
 39. **039-correlation-send-1y-chart-two-coins.md** - Feature: When using correlation, also send a 1-year chart of the two selected coins (Medium priority) ✅ Fixed
-40. **040-watchlist-for-telegram-users.md** - Feature: Create watchlist for Telegram users (Medium priority)
-41. **041-add-coins-from-yahoo-finance-api.md** - Feature: Add coins not in program and load from Yahoo Finance (or similar) API (Medium priority)
-42. **042-data-queries-labels-command-name-only.md** - Enhancement: In Data Queries show only command name (no "BTC"); use BTC as default when selected (Low priority) ✅ Fixed
-43. **043-delete-data-queries-message-after-button-click.md** - Enhancement: Delete the Data Queries menu message after button click for cleaner conversation (Low priority)
+40. **040-watchlist-for-telegram-users.md** - Feature: Create watchlist for Telegram users (Medium priority) *(GitHub #41)*
+41. **041-add-coins-from-yahoo-finance-api.md** - Feature: Add coins not in program and load from Yahoo Finance (or similar) API (Medium priority) *(GitHub #42)*
+42. **042-data-queries-labels-command-name-only.md** - Enhancement: In Data Queries show only command name (no "BTC"); use BTC as default when selected (Low priority) ✅ Fixed *(GitHub #43)*
+43. **043-delete-data-queries-message-after-button-click.md** - Enhancement: Delete the Data Queries menu message after button click for cleaner conversation (Low priority) *(GitHub #44)*
+44. **044-commodities-support-gold-xau-silver-xag-copper-xcu.md** - Feature: Add commodities support (Gold XAU, Silver XAG, Copper XCU) to Telegram bot (Medium priority) *(GitHub #45)*
+45. **045-stablecoins-aggregate-usdt-d-all-stables.md** - Feature: Use aggregate stablecoin supply instead of only USDT / USDT.D (Medium priority)
 
 ## Priority Guide
 

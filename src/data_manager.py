@@ -137,7 +137,20 @@ class DataManager:
         """Create DataFrame from series and add pseudo series."""
         self.df_raw = pd.DataFrame(self.series).sort_index().ffill()
         
-        # Add pseudo series (USDT.D)
+        # Add aggregate stablecoin series (STABLES) based on coins tagged as Stablecoins
+        # This will be used to compute STABLES.D (stablecoin dominance) in chart_builder.
+        try:
+            stable_syms = [sym for sym, (cat, grp) in self.meta.items() if "Stablecoin" in (cat or "")]
+            if stable_syms:
+                logger.info(f"Building aggregate stablecoin series from: {', '.join(sorted(stable_syms))}")
+                stables_series = self.df_raw[stable_syms].sum(axis=1)
+                self.df_raw["STABLES"] = stables_series
+                # Mark STABLES as a metric in metadata (not a regular coin)
+                self.meta["STABLES"] = ("Aggregate stablecoins (sum of tracked stables)", "metric")
+        except Exception as e:
+            logger.warning(f"Could not build aggregate stablecoin series: {e}")
+        
+        # Add pseudo series (STABLES.D)
         self.meta[DOM_SYM] = (DOM_CAT, DOM_GRP)
         self.symbols_all = list(self.df_raw.columns) + [DOM_SYM]
 

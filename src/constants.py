@@ -43,9 +43,9 @@ DEFAULT_SMOOTHING = "7D SMA"
 DEFAULT_VIEW = "Normalized (Linear)"  # Options: "Normalized (Linear)" | "Normalized (Log)" | "Market Cap (Log)"
 DEFAULT_CORR_MODE = "returns"  # Options: "off" | "returns"
 
-# Pseudo series (USDT Dominance)
-DOM_SYM = "USDT.D"
-DOM_CAT = "USDT dominance (USDT / sum(coins)) — indexed"
+# Pseudo series (Stablecoin dominance - aggregate)
+DOM_SYM = "STABLES.D"
+DOM_CAT = "Stablecoin dominance (sum of tracked stablecoins / sum(coins)) — indexed"
 DOM_GRP = "metric"
 
 # Data Quality Thresholds
