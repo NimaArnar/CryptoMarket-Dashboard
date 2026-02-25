@@ -2964,7 +2964,7 @@ def _fetch_hourly_price_data(coin_id: str, days: int) -> Optional[pd.Series]:
         return None
 
 
-def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, timeframe: str, days: int) -> Optional[Path]:
+def _generate_chart_image(symbol: str, coin_id: Optional[str], price_series: pd.Series, timeframe: str, days: int) -> Optional[Path]:
     """Generate a chart image with dual Y-axes (price on left, indexed on right), both logarithmic.
     
     Uses best resolution available:
@@ -2982,8 +2982,9 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
         Path to generated PNG file or None on error
     """
     try:
-        # For 1w and 1m, fetch hourly data and use it directly
-        if timeframe in ("1w", "1m"):
+        # For 1w and 1m, fetch hourly data and use it directly when we have a CoinGecko ID;
+        # otherwise (e.g. commodities), fall back to daily data.
+        if timeframe in ("1w", "1m") and coin_id:
             hourly_data = _fetch_hourly_price_data(coin_id, days)
             if hourly_data is None or hourly_data.empty:
                 logger.warning(f"Could not fetch hourly data for {symbol}, falling back to daily")
@@ -3680,20 +3681,45 @@ async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     
     days = valid_timeframes[timeframe_arg]
 
-    # Special case: commodities (Gold XAU, Silver XAG, Copper XCU) via Yahoo Finance
+    # Special case: commodities (Gold XAU, Silver XAG, Copper XCU) via Yahoo Finance,
+    # but reuse the same chart image logic as crypto (dual-axis price + index).
     if symbol in {"XAU", "XAG", "XCU"}:
         loading_msg = None
         try:
             loading_msg = await create_loading_message(update)
             loop = asyncio.get_event_loop()
-            # Run blocking history fetch + chart generation in executor
+
+            # Fetch daily commodity history in executor
+            from src.data import fetch_commodity_history
+            price_series = await loop.run_in_executor(None, fetch_commodity_history, symbol, days)
+            if price_series is None or price_series.empty:
+                await safe_delete_loading_message(loading_msg)
+                await update.message.reply_text(
+                    f"❌ Failed to generate chart for {symbol} (commodity).\n\n"
+                    "💡 The external price source may be temporarily unavailable or missing data. Please try again later."
+                )
+                return
+
+            price_series = price_series.dropna().sort_index()
+            if price_series.empty:
+                await safe_delete_loading_message(loading_msg)
+                await update.message.reply_text(
+                    f"❌ Failed to generate chart for {symbol} (commodity).\n\n"
+                    "💡 The external price source may be temporarily unavailable or missing data. Please try again later."
+                )
+                return
+
+            # Run chart generation using the same helper as crypto (coin_id=None → skip hourly fetch)
             chart_path = await loop.run_in_executor(
                 None,
-                _generate_commodity_chart_image,
+                _generate_chart_image,
                 symbol,
+                None,
+                price_series,
                 timeframe_arg,
                 days,
             )
+
             if chart_path is None or not chart_path.exists():
                 await safe_delete_loading_message(loading_msg)
                 await update.message.reply_text(
@@ -3702,7 +3728,7 @@ async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 )
                 return
 
-            # Build caption (simpler than crypto, but consistent)
+            # Build caption (similar to crypto but labeled as commodity)
             timeframe_labels = {"1w": "1 Week", "1m": "1 Month", "1y": "1 Year"}
             timeframe_label = timeframe_labels.get(timeframe_arg, timeframe_arg)
 
