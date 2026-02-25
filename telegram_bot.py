@@ -2165,7 +2165,26 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
     
-    # Find coin_id for this symbol
+    # Special case: commodities (Gold XAU, Silver XAG, Copper XCU) via Yahoo Finance
+    if symbol in {"XAU", "XAG", "XCU"}:
+        from src.data import fetch_latest_commodity_price
+        loop = asyncio.get_event_loop()
+        price = await loop.run_in_executor(None, fetch_latest_commodity_price, symbol)
+        if price is None:
+            await update.message.reply_text(
+                f"❌ Could not fetch price for {symbol} (commodity).\n\n"
+                "💡 The external price source may be temporarily unavailable. Please try again later."
+            )
+            return
+        price_text = (
+            f"💰 *{symbol} Price* (commodity)\n\n"
+            f"Price: ${price:,.2f}\n\n"
+            "Source: Yahoo Finance futures data"
+        )
+        await update.message.reply_text(price_text, parse_mode="Markdown")
+        return
+    
+    # Find coin_id for this symbol (crypto)
     coin_info = _find_coin_info(symbol)
     if not coin_info:
         await update.message.reply_text(f"❌ Coin '{symbol}' not found. Use /coins to see available coins.")

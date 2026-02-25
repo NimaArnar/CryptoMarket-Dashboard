@@ -8,6 +8,7 @@ from src.data.transformer import (
     normalize_series_start100,
     symbols_for_view,
 )
+from src.data.commodities import fetch_latest_commodity_price
 
 __all__ = [
     "fetch_all_coins",
@@ -18,5 +19,6 @@ __all__ = [
     "normalize_series_start100",
     "group_filter",
     "symbols_for_view",
+    "fetch_latest_commodity_price",
 ]
 
