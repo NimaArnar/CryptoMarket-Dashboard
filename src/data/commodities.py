@@ -55,3 +55,50 @@ def fetch_latest_commodity_price(symbol: str) -> Optional[float]:
         logger.error(f"Failed to fetch commodity price for {symbol} ({ticker}): {e}")
         return None
 
+
+def fetch_commodity_history(symbol: str, days: int) -> Optional[pd.Series]:
+    """
+    Fetch historical daily close prices (USD) for a commodity symbol.
+
+    This is used by the Telegram bot for /chart on commodities.
+    Returns a pandas Series indexed by date with Close prices.
+    """
+    sym = symbol.upper()
+    ticker = YAHOO_TICKERS.get(sym)
+    if not ticker:
+        logger.warning(f"Unknown commodity symbol for Yahoo Finance history: {symbol}")
+        return None
+
+    # Add a small buffer so we have at least `days` of data after dropping NA
+    lookback_days = max(days + 5, 10)
+
+    try:
+        data = yf.download(
+            ticker,
+            period=f"{lookback_days}d",
+            interval="1d",
+            progress=False,
+        )
+        if data.empty or "Close" not in data.columns:
+            logger.warning(f"No historical data returned for {symbol} ({ticker})")
+            return None
+
+        close_series = data["Close"].dropna()
+        if close_series.empty:
+            logger.warning(f"Empty historical close series for {symbol} ({ticker})")
+            return None
+
+        # Keep only the most recent `days` observations
+        close_series = close_series.iloc[-days:]
+        if close_series.empty:
+            logger.warning(f"Not enough historical data for {symbol} ({ticker}) for {days} days")
+            return None
+
+        # Ensure a DateTimeIndex
+        close_series.index = pd.to_datetime(close_series.index)
+        logger.info(f"Fetched {len(close_series)} historical points for {symbol} ({ticker})")
+        return close_series
+    except Exception as e:
+        logger.error(f"Failed to fetch commodity history for {symbol} ({ticker}): {e}")
+        return None
+

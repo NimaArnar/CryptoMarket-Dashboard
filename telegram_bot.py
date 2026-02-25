@@ -2487,6 +2487,37 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         return
     
+    # Special case: commodities - provide basic info without requiring dashboard
+    if symbol in {"XAU", "XAG", "XCU"}:
+        from src.data import fetch_latest_commodity_price
+        loop = asyncio.get_event_loop()
+        price = await loop.run_in_executor(None, fetch_latest_commodity_price, symbol)
+        if price is None:
+            await update.message.reply_text(
+                f"ℹ️ *{symbol} Information (Commodity)*\n\n"
+                "Basic info is available, but the latest price could not be fetched right now.\n"
+                "Please try again later or use /price for a fresh quote.",
+                parse_mode="Markdown",
+            )
+            return
+
+        pretty_name = {
+            "XAU": "Gold (XAU)",
+            "XAG": "Silver (XAG)",
+            "XCU": "Copper (XCU)",
+        }.get(symbol, symbol)
+
+        info_text = (
+            f"📊 *{pretty_name} Information (Commodity)*\n\n"
+            f"Category: Commodity\n"
+            f"Group: Metals\n\n"
+            f"Latest Price: ${price:,.2f}\n\n"
+            "Detailed on-chain metrics and market cap are not available for commodities in this bot yet.\n"
+            "Use /chart for a historical price chart."
+        )
+        await update.message.reply_text(info_text, parse_mode="Markdown")
+        return
+
     # Check if dashboard is running
     if not _check_dashboard_running():
         await update.message.reply_text(
@@ -2726,6 +2757,16 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "Examples:\n"
             "/summary BTC\n"
             "/summary BTC 1w"
+        )
+        return
+
+    # Special case: commodities - summaries are not yet backed by full historical metrics
+    if symbol in {"XAU", "XAG", "XCU"}:
+        await update.message.reply_text(
+            f"📊 *{symbol} Summary (Commodity)*\n\n"
+            "Commodities currently support /price for live quotes and /chart for historical price charts.\n"
+            "Detailed timeframe summaries (1d/1w/1m/1y) are not implemented for commodities yet.",
+            parse_mode="Markdown",
         )
         return
 
@@ -3138,6 +3179,176 @@ def _generate_chart_image(symbol: str, coin_id: str, price_series: pd.Series, ti
         return None
 
 
+def _generate_commodity_chart_image(symbol: str, timeframe: str, days: int) -> Optional[Path]:
+    """
+    Generate a chart image for a commodity (XAU/XAG/XCU) using Yahoo Finance daily data.
+
+    The chart mirrors the crypto chart style: price on left Y-axis (log), indexed series on right Y-axis (log).
+    """
+    from src.data import fetch_commodity_history
+
+    try:
+        # Fetch historical daily data
+        price_series = fetch_commodity_history(symbol, days)
+        if price_series is None or price_series.empty:
+            logger.warning(f"No historical commodity data available for {symbol}")
+            return None
+
+        price_series = price_series.sort_index().dropna()
+        if price_series.empty:
+            return None
+
+        # Ensure we only use the last `days` of data
+        end_date = price_series.index[-1]
+        start_date = end_date - pd.Timedelta(days=days)
+        timeframe_data = price_series[price_series.index >= start_date].dropna()
+
+        if timeframe_data.empty or len(timeframe_data) < 2:
+            logger.warning(f"Not enough historical commodity data for {symbol} to generate chart")
+            return None
+
+        timeframe_data = timeframe_data.astype("float64")
+        timeframe_data = timeframe_data[timeframe_data > 0]
+        if timeframe_data.empty or len(timeframe_data) < 2:
+            logger.warning(f"No valid positive commodity price data for {symbol}")
+            return None
+
+        # Indexed series (start at 100)
+        first_price = timeframe_data.iloc[0]
+        indexed_price = (timeframe_data / first_price) * 100
+
+        max_price = timeframe_data.max()
+        min_price = timeframe_data.min()
+        logger.debug(f"Commodity chart for {symbol}: min=${min_price:.8f}, max=${max_price:.8f}, count={len(timeframe_data)}")
+
+        if timeframe_data.sum() == 0 or all(v == 0 for v in timeframe_data.values):
+            logger.error(f"All commodity price values are zero for {symbol} - cannot generate chart")
+            return None
+
+        # Tick format / precision similar to crypto charts
+        if max_price < 0.01:
+            tick_format = '$,.6f'
+            hover_precision = 6
+        elif max_price < 0.1:
+            tick_format = '$,.4f'
+            hover_precision = 4
+        elif max_price < 1:
+            tick_format = '$,.3f'
+            hover_precision = 3
+        elif max_price < 1000:
+            tick_format = '$,.2f'
+            hover_precision = 2
+        else:
+            tick_format = '$,.0f'
+            hover_precision = 2
+
+        fig = go.Figure()
+
+        # For commodities we always use daily data, so date-only labels are fine
+        date_format = '%Y-%m-%d'
+        xaxis_title = 'Date'
+
+        # Price trace
+        price_values = timeframe_data.values.astype("float64")
+        fig.add_trace(go.Scatter(
+            x=timeframe_data.index,
+            y=price_values,
+            mode='lines',
+            name=f'{symbol} Price',
+            line=dict(width=2, color='#1f77b4'),
+            yaxis='y',
+            hovertemplate=f'<b>%{{fullData.name}}</b><br>'
+                         f'Date: %{{x|{date_format}}}<br>'
+                         f'Price: $%{{y:,.{hover_precision}f}}<extra></extra>'
+        ))
+
+        # Indexed trace
+        fig.add_trace(go.Scatter(
+            x=indexed_price.index,
+            y=indexed_price.values,
+            mode='lines',
+            name=f'{symbol} Index',
+            line=dict(width=2, color='#ff7f0e', dash='dash'),
+            yaxis='y2',
+            hovertemplate=f'<b>%{{fullData.name}}</b><br>'
+                         f'Date: %{{x|{date_format}}}<br>'
+                         'Index: %{y:.2f}<extra></extra>'
+        ))
+
+        timeframe_labels = {
+            "1w": "1 Week",
+            "1m": "1 Month",
+            "1y": "1 Year",
+        }
+        timeframe_label = timeframe_labels.get(timeframe, timeframe)
+
+        fig.update_layout(
+            title=dict(
+                text=f'{symbol} Price & Index (Commodity) - Last {timeframe_label}',
+                font=dict(size=16),
+            ),
+            xaxis=dict(
+                title=xaxis_title,
+                type='date',
+                showgrid=True,
+                gridcolor='rgba(128,128,128,0.2)',
+            ),
+            yaxis=dict(
+                title='Price (USD)',
+                type='log',
+                side='left',
+                showgrid=True,
+                gridcolor='rgba(128,128,128,0.2)',
+                tickformat=tick_format,
+                exponentformat='power' if max_price < 0.01 else 'none',
+            ),
+            yaxis2=dict(
+                title='Index (100 = start)',
+                type='log',
+                side='right',
+                overlaying='y',
+                showgrid=False,
+                tickformat='.1f',
+            ),
+            hovermode='x unified',
+            template='plotly_white',
+            width=1200,
+            height=600,
+            margin=dict(l=80, r=80, t=60, b=60),
+            legend=dict(
+                x=0.02,
+                y=0.98,
+                bgcolor='rgba(255,255,255,0.8)',
+                bordercolor='rgba(0,0,0,0.2)',
+                borderwidth=1,
+            ),
+        )
+
+        charts_dir = PROJECT_ROOT / "charts"
+        charts_dir.mkdir(exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        chart_filename = f"{symbol}_commodity_{timeframe}_{timestamp}.png"
+        chart_path = charts_dir / chart_filename
+
+        try:
+            fig.write_image(str(chart_path), width=1200, height=600, scale=2)
+            logger.debug(f"Commodity chart saved to {chart_path}")
+            return chart_path
+        except Exception as e:
+            logger.error(f"Failed to export commodity chart image: {e}")
+            try:
+                import kaleido  # noqa: F401
+                logger.debug("kaleido is installed but export failed for commodity chart")
+            except ImportError:
+                logger.error("kaleido not installed. Install with: pip install kaleido")
+            return None
+
+    except Exception as e:
+        logger.error(f"Error generating commodity chart for {symbol}: {e}")
+        return None
+
+
 def _generate_two_coin_1y_chart(symbol_a: str, symbol_b: str) -> Optional[Path]:
     """Generate a 1-year indexed comparison chart for two coins (both normalized to 100 at start). Returns path to PNG or None."""
     from src.app.callbacks import _load_price_data
@@ -3311,7 +3522,50 @@ async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     
     days = valid_timeframes[timeframe_arg]
-    
+
+    # Special case: commodities (Gold XAU, Silver XAG, Copper XCU) via Yahoo Finance
+    if symbol in {"XAU", "XAG", "XCU"}:
+        loading_msg = None
+        try:
+            loading_msg = await create_loading_message(update)
+            loop = asyncio.get_event_loop()
+            # Run blocking history fetch + chart generation in executor
+            chart_path = await loop.run_in_executor(
+                None,
+                _generate_commodity_chart_image,
+                symbol,
+                timeframe_arg,
+                days,
+            )
+            if chart_path is None or not chart_path.exists():
+                await safe_delete_loading_message(loading_msg)
+                await update.message.reply_text(
+                    f"❌ Failed to generate chart for {symbol} (commodity).\n\n"
+                    "💡 The external price source may be temporarily unavailable or missing data. Please try again later."
+                )
+                return
+
+            # Build caption (simpler than crypto, but consistent)
+            timeframe_labels = {"1w": "1 Week", "1m": "1 Month", "1y": "1 Year"}
+            timeframe_label = timeframe_labels.get(timeframe_arg, timeframe_arg)
+
+            await safe_delete_loading_message(loading_msg)
+            with open(chart_path, "rb") as photo:
+                await update.message.reply_photo(
+                    photo=photo,
+                    caption=f"📈 *{symbol} Price & Index (Commodity) - Last {timeframe_label}*",
+                    parse_mode="Markdown",
+                )
+            try:
+                chart_path.unlink()
+            except Exception as e:
+                logger.debug(f"Could not delete commodity chart file: {e}")
+        except Exception as e:
+            logger.error(f"Error generating commodity chart for {symbol}: {e}")
+            await safe_delete_loading_message(loading_msg)
+            await update.message.reply_text(f"❌ Error generating commodity chart for {symbol}: {str(e)}")
+        return
+
     # Require dashboard data
     if not _check_dashboard_running():
         await update.message.reply_text(
