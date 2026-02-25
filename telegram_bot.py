@@ -3349,17 +3349,55 @@ def _generate_commodity_chart_image(symbol: str, timeframe: str, days: int) -> O
         return None
 
 
+def _load_price_series_for_symbol(symbol: str, min_days: int = 365) -> Optional[pd.Series]:
+    """
+    Load a daily price series for a symbol, supporting both crypto coins and commodities.
+
+    For crypto, uses dashboard price data via _load_price_data.
+    For commodities (XAU/XAG/XCU), uses Yahoo Finance via fetch_commodity_history.
+    """
+    symbol = symbol.upper()
+    commodity_syms = {"XAU", "XAG", "XCU"}
+
+    if symbol in commodity_syms:
+        from src.data import fetch_commodity_history
+
+        series = fetch_commodity_history(symbol, min_days)
+        if series is None or series.empty:
+            return None
+        series = series.dropna().sort_index()
+    else:
+        from src.app.callbacks import _load_price_data
+
+        prices_dict = _load_price_data()
+        series = prices_dict.get(symbol)
+        if series is None or series.empty:
+            return None
+        series = series.dropna().sort_index()
+
+    if series.empty:
+        return None
+
+    # Keep at most the last `min_days` of data
+    end = series.index[-1]
+    start = end - pd.Timedelta(days=min_days)
+    series = series[series.index >= start]
+    return series if not series.empty else None
+
+
 def _generate_two_coin_1y_chart(symbol_a: str, symbol_b: str) -> Optional[Path]:
-    """Generate a 1-year indexed comparison chart for two coins (both normalized to 100 at start). Returns path to PNG or None."""
-    from src.app.callbacks import _load_price_data
-    prices_dict = _load_price_data()
-    pa = prices_dict.get(symbol_a)
-    pb = prices_dict.get(symbol_b)
+    """
+    Generate a 1-year indexed comparison chart for two assets (coins or commodities),
+    both normalized to 100 at start. Returns path to PNG or None.
+    """
+    pa = _load_price_series_for_symbol(symbol_a, min_days=365)
+    pb = _load_price_series_for_symbol(symbol_b, min_days=365)
     if pa is None or pa.empty or pb is None or pb.empty:
         return None
+
+    # Align to common dates (inner join), then take last 365 days
     pa = pa.dropna().sort_index()
     pb = pb.dropna().sort_index()
-    # Align to common dates (inner join), then take last 365 days
     common = pa.index.intersection(pb.index).sort_values()
     if len(common) < 2:
         return None
@@ -3370,6 +3408,7 @@ def _generate_two_coin_1y_chart(symbol_a: str, symbol_b: str) -> Optional[Path]:
         return None
     pa = pa.reindex(common).ffill().bfill()
     pb = pb.reindex(common).ffill().bfill()
+
     # Index both to 100 at first date
     base_a = pa.iloc[0]
     base_b = pb.iloc[0]
@@ -3432,6 +3471,99 @@ def _compute_and_export_correlation(symbol_a: str, symbol_b: str) -> Tuple[str, 
         return corr_text, None
 
 
+def _compute_and_export_price_correlation(symbol_a: str, symbol_b: str) -> Tuple[str, Optional[Path]]:
+    """
+    Compute correlation between two assets (coins or commodities) using daily price returns
+    and export a scatter plot to PNG. Returns (message_text, image_path or None).
+    """
+    symbol_a = symbol_a.upper()
+    symbol_b = symbol_b.upper()
+
+    pa = _load_price_series_for_symbol(symbol_a, min_days=365)
+    pb = _load_price_series_for_symbol(symbol_b, min_days=365)
+    if pa is None or pb is None or pa.empty or pb.empty:
+        return (
+            f"❌ Could not load sufficient price history for {symbol_a} or {symbol_b}. "
+            "Make sure both symbols are supported and have historical data.",
+            None,
+        )
+
+    # Align on common dates
+    pa = pa.dropna().sort_index()
+    pb = pb.dropna().sort_index()
+    common = pa.index.intersection(pb.index).sort_values()
+    if len(common) < 10:
+        return (
+            "Not enough overlapping history between the two assets to compute a reliable correlation.",
+            None,
+        )
+    pa = pa.reindex(common).ffill().bfill()
+    pb = pb.reindex(common).ffill().bfill()
+
+    # Daily returns
+    ra = pa.pct_change().dropna()
+    rb = pb.pct_change().dropna()
+    common_ret = ra.index.intersection(rb.index).sort_values()
+    if len(common_ret) < 10:
+        return (
+            "Not enough overlapping daily returns between the two assets to compute a reliable correlation.",
+            None,
+        )
+    ra = ra.reindex(common_ret)
+    rb = rb.reindex(common_ret)
+
+    corr_value = ra.corr(rb)
+    start_date = common_ret[0].strftime("%Y-%m-%d")
+    end_date = common_ret[-1].strftime("%Y-%m-%d")
+    n_points = len(common_ret)
+
+    corr_text = (
+        f"Correlation of daily returns between *{symbol_a}* and *{symbol_b}*.\n\n"
+        f"Window: {start_date} → {end_date} ({n_points} days)\n"
+        f"Pearson correlation: {corr_value:+.3f}"
+    )
+
+    # Build scatter plot
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=ra.values,
+            y=rb.values,
+            mode="markers",
+            marker=dict(size=6, color="#1f77b4", opacity=0.7),
+            name=f"{symbol_a} vs {symbol_b}",
+            hovertemplate=(
+                f"{symbol_a} return: %{{x:.2%}}<br>"
+                f"{symbol_b} return: %{{y:.2%}}<extra></extra>"
+            ),
+        )
+    )
+    fig.update_layout(
+        title=dict(
+            text=f"Daily Returns Correlation — {symbol_a} vs {symbol_b}",
+            font=dict(size=14),
+        ),
+        xaxis=dict(title=f"{symbol_a} daily return", zeroline=True, zerolinecolor="#888"),
+        yaxis=dict(title=f"{symbol_b} daily return", zeroline=True, zerolinecolor="#888"),
+        template="plotly_white",
+        width=900,
+        height=500,
+        margin=dict(l=60, r=40, t=50, b=50),
+    )
+
+    charts_dir = PROJECT_ROOT / "charts"
+    charts_dir.mkdir(exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    chart_filename = f"corr_price_{symbol_a}_{symbol_b}_{timestamp}.png"
+    chart_path = charts_dir / chart_filename
+    try:
+        fig.write_image(str(chart_path), width=900, height=500, scale=2)
+        return corr_text, chart_path
+    except Exception as e:
+        logger.error(f"Failed to export price-based correlation image: {e}")
+        return corr_text, None
+
+
 @rate_limit(max_calls=10, period=60)
 async def corr_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /corr command - correlation between two coins (default: BTC and ETH). Full output as main program + chart image."""
@@ -3446,7 +3578,13 @@ async def corr_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "❌ Invalid symbol format. Use 1–10 alphanumeric characters.\nExample: /corr BTC ETH"
         )
         return
-    if not _check_dashboard_running():
+
+    commodity_syms = {"XAU", "XAG", "XCU"}
+    is_commodity_pair = symbol_a in commodity_syms or symbol_b in commodity_syms
+
+    # For pure crypto/metric pairs, require dashboard and use dashboard-based correlation.
+    # For any pair involving commodities, use price-based correlation helper.
+    if not is_commodity_pair and not _check_dashboard_running():
         await update.message.reply_text(
             "⚠️ *Dashboard is offline*\n\nCorrelation uses dashboard market cap data. Use /run to start it first.",
             parse_mode="Markdown"
@@ -3456,9 +3594,15 @@ async def corr_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     try:
         loading_msg = await create_loading_message(update)
         loop = asyncio.get_event_loop()
-        corr_text, chart_path = await loop.run_in_executor(
-            None, _compute_and_export_correlation, symbol_a, symbol_b
-        )
+
+        if is_commodity_pair:
+            corr_text, chart_path = await loop.run_in_executor(
+                None, _compute_and_export_price_correlation, symbol_a, symbol_b
+            )
+        else:
+            corr_text, chart_path = await loop.run_in_executor(
+                None, _compute_and_export_correlation, symbol_a, symbol_b
+            )
         await safe_delete_loading_message(loading_msg)
         if chart_path and chart_path.exists():
             caption = (
@@ -3472,7 +3616,7 @@ async def corr_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 )
         else:
             await update.message.reply_text(f"📊 Correlation\n\n{corr_text}")
-        # Issue #40: also send 1-year comparison chart of the two coins
+        # Issue #40: also send 1-year comparison chart of the two assets
         chart_1y_path = await loop.run_in_executor(None, _generate_two_coin_1y_chart, symbol_a, symbol_b)
         if chart_1y_path and chart_1y_path.exists():
             with open(chart_1y_path, "rb") as photo:
